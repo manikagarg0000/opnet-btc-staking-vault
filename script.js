@@ -266,11 +266,9 @@ async function stake() {
   try {
     const p = getProvider();
 
-    /* ── PRODUCTION PSBT + CONTRACT CALL ── */
-    // buildStakePsbt() এখনো stub (পরে bitcoinjs-lib দিয়ে full OP_RETURN calldata যোগ করতে পারবে)
-    // এখনো simple sendBitcoin দিয়ে contract-এ পাঠাচ্ছি (OP_RETURN later)
+
     const txid = await p.sendBitcoin(
-      VAULT.VAULT_CONTRACT,   // ← এটাই staking contract
+      VAULT.VAULT_CONTRACT,   // staking contract
       amtSats,
       { feeRate: 10 }
     );
