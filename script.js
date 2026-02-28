@@ -37,7 +37,7 @@ const VAULT = {
    * In production, stake() / unstake() build a PSBT with
    * OP_RETURN calldata targeting this contract.
    */
-  VAULT_CONTRACT: 'tb1qvault0pnet0staking0contract0testnet3xxxx',
+  VAULT_CONTRACT: 'opt1pttw57hg6gpav0dn5cvzjpcg2v7098j4jkyeej353str5w2r3d92qmyj3tc',
 
   /* Vault balances */
   totalStaked:   0,   // global TVL in satoshis
