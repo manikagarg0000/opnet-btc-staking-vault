@@ -1,13 +1,13 @@
 # opnet-btc-staking-vault
 
-# ₿ VAULT — Bitcoin Staking on OP_NET Testnet
+# ₿ VAULT  Bitcoin Staking on OP_NET Testnet
 
 A production-ready Bitcoin staking vault web app built on **OP_NET Testnet3**.  
 Every stake, unstake, and compound action is a **real on-chain transaction** signed by the user's OP_Wallet.
 
 ---
 
-## 📁 File Structure
+##  File Structure
 
 ```
 btc-staking-vault/
@@ -19,21 +19,21 @@ btc-staking-vault/
 
 ---
 
-## ✨ Features
+##  Features
 
 | Feature | Description |
 |---|---|
-| 🔐 OP_Wallet Connect | Connects via `window.opnet` (UniSat fork) provider |
+|  OP_Wallet Connect | Connects via `window.opnet` (UniSat fork) provider |
 | ₿ Stake tBTC | Real on-chain TX via `sendBitcoin()` |
-| 🔓 Unstake tBTC | Withdraw from vault with wallet signature |
-| 🔄 Auto-Compound | Rewards reinvested every hour automatically |
-| 📊 Live Dashboard | TVL, user stake, APY, rewards, countdown timer |
-| 📡 TX Log | Every transaction logged with TXID → OP_SCAN link |
-| 🔔 Toast Alerts | Success / error / info notifications |
+|  Unstake tBTC | Withdraw from vault with wallet signature |
+|  Auto-Compound | Rewards reinvested every hour automatically |
+|  Live Dashboard | TVL, user stake, APY, rewards, countdown timer |
+|  TX Log | Every transaction logged with TXID → OP_SCAN link |
+|  Toast Alerts | Success / error / info notifications |
 
 ---
 
-## 🚀 Getting Started
+##  Getting Started
 
 ### 1. Install OP_Wallet
 
@@ -68,7 +68,7 @@ Then open `http://localhost:8080`
 
 ---
 
-## 🔧 OP_Wallet API Reference
+##  OP_Wallet API Reference
 
 OP_Wallet injects `window.opnet` (primary) or `window.unisat` (fallback).
 
@@ -100,7 +100,7 @@ p.on('networkChanged',  (network)  => { });
 
 ---
 
-## ⚙️ Core Functions (`script.js`)
+##  Core Functions (`script.js`)
 
 ```js
 // Connect OP_Wallet (opens popup)
@@ -140,7 +140,7 @@ getVaultStats()
 
 ---
 
-## 🔄 Auto-Compound Formula
+##  Auto-Compound Formula
 
 Rewards per cycle are calculated as:
 
@@ -155,7 +155,7 @@ When the countdown hits zero, it compounds silently in the background.
 
 ---
 
-## 🌐 Production Upgrade Path
+##  Production Upgrade Path
 
 To use a real OP_NET staking contract, replace `sendBitcoin()` calls with:
 
@@ -170,7 +170,7 @@ Replace `VAULT.VAULT_CONTRACT` with your deployed OP_NET contract address.
 
 ---
 
-## 🔗 Links
+##  Links
 
 | Resource | URL |
 |---|---|
@@ -182,6 +182,6 @@ Replace `VAULT.VAULT_CONTRACT` with your deployed OP_NET contract address.
 
 ---
 
-## 📄 License
+##  License
 
 MIT — free to use, fork, and build on.
