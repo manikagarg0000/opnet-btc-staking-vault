@@ -250,42 +250,29 @@ async function stake() {
   }
 
   const amtSats = parseInt(document.getElementById('stakeAmt').value, 10);
-
   if (!amtSats || amtSats < 1000) {
     toast('err', 'INVALID AMOUNT', 'Minimum stake is 1,000 satoshis');
     return;
   }
-
   if (amtSats > VAULT.walletBalSats) {
-    toast('err', 'INSUFFICIENT BALANCE',
-      `You have ${VAULT.walletBalSats.toLocaleString()} sats.\n` +
-      `Requested: ${amtSats.toLocaleString()} sats`);
+    toast('err', 'INSUFFICIENT BALANCE', `You have ${VAULT.walletBalSats.toLocaleString()} sats`);
     return;
   }
 
-  const btn  = document.getElementById('stakeBtnEl');
+  const btn = document.getElementById('stakeBtnEl');
   const orig = btn.textContent;
   setLoading(btn, 'stakeProg', 'stakeProgF', 'AWAITING SIGNATURE...');
 
   try {
     const p = getProvider();
 
-    /*
-     * ── REAL ON-CHAIN TX via OP_Wallet ──
-     * sendBitcoin(toAddress, amountSats, { feeRate })
-     *   → Opens OP_Wallet popup
-     *   → User approves and signs
-     *   → Returns txid string on success
-     *
-     * In production this becomes:
-     *   const psbt = buildStakePsbt(VAULT.address, VAULT.VAULT_CONTRACT, amtSats);
-     *   const signed = await p.signPsbt(psbt);
-     *   const txid   = await p.pushPsbt(signed);
-     */
+    /* ── PRODUCTION PSBT + CONTRACT CALL ── */
+    // buildStakePsbt() এখনো stub (পরে bitcoinjs-lib দিয়ে full OP_RETURN calldata যোগ করতে পারবে)
+    // এখনো simple sendBitcoin দিয়ে contract-এ পাঠাচ্ছি (OP_RETURN later)
     const txid = await p.sendBitcoin(
-      VAULT.address,   // → VAULT_CONTRACT in production
+      VAULT.VAULT_CONTRACT,   // ← এটাই staking contract
       amtSats,
-      { feeRate: 10 }  // sat/vByte
+      { feeRate: 10 }
     );
 
     /* Update state */
@@ -297,19 +284,16 @@ async function stake() {
     await refreshWalletBalance();
     updateDashboard();
 
-    /* Clear input + preview */
     document.getElementById('stakeAmt').value = '';
     updateStakePreview();
-
-    /* Update last TX hash display */
     document.getElementById('lastTxHash').textContent = txid.slice(0, 18) + '...';
 
-    addTx('stake', VAULT.address, `staked ${amtSats.toLocaleString()} sats`, txid);
+    addTx('stake', VAULT.address, `staked ${amtSats.toLocaleString()} sats → CONTRACT`, txid);
     toast('ok', 'STAKE CONFIRMED ON-CHAIN!',
       `Staked: ${amtSats.toLocaleString()} sats\nTXID: ${txid.slice(0, 22)}...`);
 
   } catch (err) {
-    toast('err', 'STAKE FAILED', err.message || 'Transaction rejected or failed');
+    toast('err', 'STAKE FAILED', err.message || 'Transaction rejected');
   } finally {
     clearLoading(btn, 'stakeProg', 'stakeProgF', orig);
   }
