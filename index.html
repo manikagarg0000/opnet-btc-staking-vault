@@ -4,20 +4,25 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>VAULT — Bitcoin Staking · OP_NET Testnet</title>
-  
-<script src="https://bundle.run/buffer@6.0.3"></script>
-<script>
-  window.Buffer = window.Buffer || buffer.Buffer;
-</script>
-  
+
+  <!--
+    ❌ REMOVED: Buffer polyfill (bundle.run/buffer@6.0.3)
+       That is a Node.js polyfill. OP_Wallet is a browser extension
+       and does NOT need window.Buffer. It can crash the page if
+       the CDN is slow, down, or blocked.
+  -->
+
   <!-- Google Fonts -->
   <link
     href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Barlow:wght@400;500;600;700&display=swap"
     rel="stylesheet"
   />
 
-  <!-- Stylesheet -->
-  <link rel="stylesheet" href="/style.css">  
+  <!--
+    ✅ FIXED: was href="/style.css" (absolute path — breaks on Vercel subfolders)
+              now href="./style.css" (relative path — works everywhere)
+  -->
+  <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
 
@@ -187,7 +192,6 @@
             STAKE tBTC
           </div>
 
-          <!-- Gate: shown when wallet NOT connected -->
           <div id="stakeGate" class="wgate" style="display:none">
             <div class="wgate-ico">🔐</div>
             <div class="wgate-head">CONNECT TO STAKE</div>
@@ -203,7 +207,6 @@
             <button class="btn btn-stake" onclick="connectWallet()">CONNECT OP_WALLET</button>
           </div>
 
-          <!-- Form: shown when wallet IS connected -->
           <div id="stakeForm">
             <div class="fg">
               <label class="fl">AMOUNT TO STAKE (satoshis)</label>
@@ -344,8 +347,12 @@
   <!-- Toast container -->
   <div class="toast-wrap" id="toasts"></div>
 
-  <!-- App script -->
-<script src="script.js"></script>
+  <!--
+    ✅ FIXED: was src="script.js" (no ./)
+              now src="./script.js" (explicit relative path, works on all hosts)
+    Placed at end of <body> so all DOM elements exist when script runs.
+  -->
+  <script src="./script.js"></script>
 
 </body>
 </html>
