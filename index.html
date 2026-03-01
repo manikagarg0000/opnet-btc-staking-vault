@@ -4,7 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>VAULT — Bitcoin Staking · OP_NET Testnet</title>
-
+  
+<script src="https://bundle.run/buffer@6.0.3"></script>
+<script>
+  window.Buffer = window.Buffer || buffer.Buffer;
+</script>
+  
   <!-- Google Fonts -->
   <link
     href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Barlow:wght@400;500;600;700&display=swap"
@@ -341,7 +346,7 @@
 
   <!-- App script -->
   <script src="/script.js"></script>
-
+<script type="module" src="./script.js"></script>
 
 </body>
 </html>
