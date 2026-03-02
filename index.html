@@ -4,355 +4,235 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>VAULT — Bitcoin Staking · OP_NET Testnet</title>
-
-  <!--
-    ❌ REMOVED: Buffer polyfill (bundle.run/buffer@6.0.3)
-       That is a Node.js polyfill. OP_Wallet is a browser extension
-       and does NOT need window.Buffer. It can crash the page if
-       the CDN is slow, down, or blocked.
-  -->
-
-  <!-- Google Fonts -->
-  <link
-    href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Barlow:wght@400;500;600;700&display=swap"
-    rel="stylesheet"
-  />
-
-  <!--
-    ✅ FIXED: was href="/style.css" (absolute path — breaks on Vercel subfolders)
-              now href="./style.css" (relative path — works everywhere)
-  -->
-  <link rel="stylesheet" href="./style.css" />
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-
-  <!-- ── BACKGROUND LAYERS ── -->
-  <div class="bp"></div>
-  <div class="bp-glow"></div>
-  <div class="vignette"></div>
-
-  <div id="root">
-
-    <!-- ════════════════════════════════
-         TOP BAR
-    ════════════════════════════════ -->
-    <div class="topbar">
-      <div class="brand">
-        <div class="brand-mark">
-          <div class="brand-hex"><span>₿</span></div>
-        </div>
-        <div class="brand-text">
-          <span class="brand-name">VAULT</span>
-          <span class="brand-sub">BITCOIN STAKING · OP_NET TESTNET</span>
-        </div>
-      </div>
-
-      <div class="topbar-right">
-        <div class="net-badge" id="netBadge" style="display:none">TESTNET3</div>
-        <div class="bal-badge" id="balBadge" style="display:none">
-          <span id="balAmt">0.000000</span> tBTC
-        </div>
-        <button class="btn-connect" id="connectBtn" onclick="connectWallet()">
-          CONNECT OP_WALLET
-        </button>
-      </div>
-    </div>
-
-    <!-- ════════════════════════════════
-         INSTALL NOTICE
-    ════════════════════════════════ -->
-    <div class="install-bar" id="installBar">
-      ⚠ OP_Wallet extension not detected.
-      <a
-        href="https://chromewebstore.google.com/detail/opwallet/pmbjpcmaaladnfpacpmhmnfmpklgbdjb"
-        target="_blank"
-      >Install from Chrome Web Store</a>
-      then refresh this page.
-    </div>
-
-    <!-- ════════════════════════════════
-         MAIN PAGE
-    ════════════════════════════════ -->
-    <div class="page">
-
-      <!-- VAULT HERO -->
-      <div class="vault-hero">
-        <div class="vault-eyebrow">OP_NET TESTNET3 · PROOF-OF-STAKE VAULT</div>
-        <div class="vault-title">BITCOIN<br />STAKING VAULT</div>
-        <div class="vault-desc">
-          Deposit tBTC. Earn auto-compounded rewards.<br />
-          Every action is a real on-chain transaction signed by OP_Wallet.
-        </div>
-        <div class="vault-pills">
-          <span class="vpill g">AUTO-COMPOUND</span>
-          <span class="vpill t">REAL ON-CHAIN TXs</span>
-          <span class="vpill b">OP_NET TESTNET</span>
-          <span class="vpill g">tBTC REWARDS</span>
-        </div>
-      </div>
-
-      <!-- STATS STRIP -->
-      <div class="stats-strip">
-        <div class="stat-box">
-          <div class="stat-label">TOTAL VAULT TVL</div>
-          <div class="stat-value" id="tvlValue">0</div>
-          <div class="stat-sub">satoshis staked</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-label">YOUR STAKED BALANCE</div>
-          <div class="stat-value teal" id="userStake">0</div>
-          <div class="stat-sub">satoshis</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-label">CURRENT APY</div>
-          <div class="stat-value blue" id="apyValue">18.4%</div>
-          <div class="stat-sub">auto-compound rate</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-label">REWARDS EARNED</div>
-          <div class="stat-value" id="rewardsEarned">0</div>
-          <div class="stat-sub">satoshis (auto-compounded)</div>
-        </div>
-      </div>
-
-      <!-- AUTO-COMPOUND PANEL -->
-      <div class="compound-panel">
-        <div class="compound-header">
-          <div class="compound-title">
-            <div class="pulse-dot" id="pulseDot"></div>
-            AUTO-COMPOUND ENGINE
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <div
-              id="compoundStatus"
-              style="font-family:'Space Mono',monospace;font-size:.6rem;color:var(--teal);letter-spacing:.1em"
-            >● ACTIVE</div>
-            <button
-              class="btn btn-compound"
-              style="width:auto;padding:8px 18px;font-size:.52rem"
-              id="triggerBtn"
-              onclick="autoCompound()"
-            >TRIGGER COMPOUND →</button>
-          </div>
-        </div>
-
-        <div class="compound-grid">
-          <div class="c-cell">
-            <div class="c-label">CYCLE LENGTH</div>
-            <div class="c-value gold" id="cycleLength">01:00:00</div>
-          </div>
-          <div class="c-cell">
-            <div class="c-label">NEXT COMPOUND</div>
-            <div class="c-value teal" id="nextCompound">—</div>
-          </div>
-          <div class="c-cell">
-            <div class="c-label">TOTAL CYCLES</div>
-            <div class="c-value" id="totalCycles">0</div>
-          </div>
-          <div class="c-cell">
-            <div class="c-label">LAST TX HASH</div>
-            <div
-              class="c-value"
-              id="lastTxHash"
-              style="font-size:.55rem;cursor:pointer;color:var(--teal)"
-              onclick="openLastTx()"
-            >—</div>
-          </div>
-        </div>
-
-        <!-- COUNTDOWN -->
-        <div class="countdown-wrap">
-          <div class="countdown-label">NEXT AUTO-COMPOUND IN</div>
-          <div class="countdown-display">
-            <div class="cd-seg">
-              <div class="cd-num" id="cdH">00</div>
-              <div class="cd-lbl">HRS</div>
-            </div>
-            <div class="cd-sep">:</div>
-            <div class="cd-seg">
-              <div class="cd-num" id="cdM">59</div>
-              <div class="cd-lbl">MIN</div>
-            </div>
-            <div class="cd-sep">:</div>
-            <div class="cd-seg">
-              <div class="cd-num" id="cdS">00</div>
-              <div class="cd-lbl">SEC</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- STAKE / UNSTAKE / APY GRID -->
-      <div class="main-grid">
-
-        <!-- STAKE CARD -->
-        <div class="vcard">
-          <div class="vcard-title">
-            <div class="vcard-title-dot"></div>
-            STAKE tBTC
-          </div>
-
-          <div id="stakeGate" class="wgate" style="display:none">
-            <div class="wgate-ico">🔐</div>
-            <div class="wgate-head">CONNECT TO STAKE</div>
-            <div class="wgate-desc">
-              Connect OP_Wallet to stake tBTC into the vault.<br />
-              All transactions run on Bitcoin Testnet3 via OP_NET.
-              <br /><a
-                href="https://chromewebstore.google.com/detail/opwallet/pmbjpcmaaladnfpacpmhmnfmpklgbdjb"
-                target="_blank"
-                class="wgate-link"
-              >→ Install OP_Wallet</a>
-            </div>
-            <button class="btn btn-stake" onclick="connectWallet()">CONNECT OP_WALLET</button>
-          </div>
-
-          <div id="stakeForm">
-            <div class="fg">
-              <label class="fl">AMOUNT TO STAKE (satoshis)</label>
-              <div class="amount-row">
-                <input
-                  class="fi"
-                  id="stakeAmt"
-                  type="number"
-                  placeholder="10000"
-                  min="1000"
-                  step="100"
-                />
-                <button class="btn-max" onclick="setMaxStake()">MAX</button>
-              </div>
-              <div class="input-info">
-                Wallet balance: <span id="walletBal">—</span> sats &nbsp;·&nbsp;
-                Min: <span>1,000</span> sats
-              </div>
-            </div>
-
-            <div class="fg preview-box">
-              <div class="preview-grid">
-                <div>
-                  <div class="fl">YOU STAKE</div>
-                  <div class="preview-val gold" id="stakePreview">—</div>
-                </div>
-                <div>
-                  <div class="fl">EST. ANNUAL YIELD</div>
-                  <div class="preview-val teal" id="yieldPreview">—</div>
-                </div>
-              </div>
-            </div>
-
-            <div class="row">
-              <button class="btn btn-stake" id="stakeBtnEl" onclick="stake()">
-                STAKE VIA OP_WALLET →
-              </button>
-            </div>
-            <div class="prog" id="stakeProg" style="display:none">
-              <div class="prog-fill" style="width:0" id="stakeProgF"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- RIGHT COLUMN: UNSTAKE + APY -->
-        <div>
-
-          <!-- UNSTAKE CARD -->
-          <div class="vcard" style="margin-bottom:20px">
-            <div class="vcard-title">
-              <div class="vcard-title-dot" style="background:var(--teal);box-shadow:0 0 6px rgba(0,212,170,.4)"></div>
-              UNSTAKE tBTC
-            </div>
-
-            <div id="unstakeGate" class="wgate" style="display:none">
-              <div class="wgate-ico">🔓</div>
-              <div class="wgate-head">STAKE FIRST</div>
-              <div class="wgate-desc">You need a staked balance to withdraw from the vault.</div>
-            </div>
-
-            <div id="unstakeForm">
-              <div class="fg">
-                <label class="fl">AMOUNT TO UNSTAKE (satoshis)</label>
-                <div class="amount-row">
-                  <input
-                    class="fi"
-                    id="unstakeAmt"
-                    type="number"
-                    placeholder="5000"
-                    min="1000"
-                    step="100"
-                  />
-                  <button class="btn-max" onclick="setMaxUnstake()">MAX</button>
-                </div>
-                <div class="input-info">
-                  Staked: <span id="stakedBal">—</span> sats
-                </div>
-              </div>
-              <button class="btn btn-unstake" id="unstakeBtnEl" onclick="unstake()">
-                UNSTAKE VIA OP_WALLET →
-              </button>
-              <div class="prog" id="unstakeProg" style="display:none">
-                <div class="prog-fill" style="width:0" id="unstakeProgF"></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- APY BREAKDOWN CARD -->
-          <div class="vcard">
-            <div class="vcard-title">
-              <div class="vcard-title-dot" style="background:var(--blue);box-shadow:0 0 6px rgba(68,136,255,.4)"></div>
-              APY BREAKDOWN
-            </div>
-
-            <div class="apy-ring-wrap">
-              <div class="ring-outer">
-                <svg class="ring-svg" width="100" height="100" viewBox="0 0 100 100">
-                  <circle class="ring-bg" cx="50" cy="50" r="45" />
-                  <circle class="ring-fill" cx="50" cy="50" r="45" id="ringFill" />
-                </svg>
-                <div class="ring-center">
-                  <div class="ring-apy" id="ringApy">18.4%</div>
-                  <div class="ring-lbl">APY</div>
-                </div>
-              </div>
-              <div class="apy-info">
-                <div class="apy-title">Auto-Compound Rate</div>
-                <div class="apy-breakdown">
-                  <div class="apy-row">Base Yield / yr <span id="baseYield">14.2%</span></div>
-                  <div class="apy-row">Compound Bonus  <span id="compBonus">+4.2%</span></div>
-                  <div class="apy-row">Compound Cycle  <span>1 Hour</span></div>
-                  <div class="apy-row">Reward Token    <span>tBTC</span></div>
-                  <div class="apy-row">Protocol        <span>OP_NET</span></div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-        </div><!-- /right column -->
-      </div><!-- /main-grid -->
-
-      <!-- TRANSACTION LOG -->
-      <div class="tx-log">
-        <div class="tx-log-title">
-          <div class="live-dot"></div>
-          TRANSACTION LOG — ON-CHAIN HISTORY
-        </div>
-        <div id="txLog">
-          <div class="tx-empty">
-            Connect OP_Wallet and start staking to see your transaction history.
-          </div>
-        </div>
-      </div>
-
-    </div><!-- /.page -->
-  </div><!-- /#root -->
-
   <!-- Toast container -->
-  <div class="toast-wrap" id="toasts"></div>
+  <div id="toast-container" class="toast-container"></div>
 
-  <!--
-    ✅ FIXED: was src="script.js" (no ./)
-              now src="./script.js" (explicit relative path, works on all hosts)
-    Placed at end of <body> so all DOM elements exist when script runs.
-  -->
-  <script src="./script.js"></script>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-icon">₿</span>
+        <div class="logo-text">
+          <span class="logo-title">VAULT</span>
+          <span class="logo-sub">BITCOIN STAKING · OP_NET TESTNET</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="network-badge" id="network-badge">TESTNET3</span>
+        <div id="wallet-section">
+          <button id="connect-btn" class="btn btn-primary">CONNECT WALLET</button>
+          <div class="wallet-info hidden" id="wallet-info-bar">
+            <span id="wallet-address" class="wallet-addr"></span>
+            <span id="wallet-balance" class="wallet-bal"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
 
+  <!-- Stats bar -->
+  <section class="stats-bar">
+    <div class="stats-inner">
+      <div class="stat-item">
+        <div class="stat-value" id="total-staked">48,230,108</div>
+        <div class="stat-label">SATOSHIS STAKED</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value" id="rewards-earned">0</div>
+        <div class="stat-label">SATOSHIS REWARDS</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value" id="apy-display">18.3%</div>
+        <div class="stat-label">AUTO-COMPOUND RATE</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value" id="user-staked-global">0</div>
+        <div class="stat-label">SATOSHIS (AUTO-COMPOUNDED)</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Main content -->
+  <main class="main">
+    <!-- Auto-compound engine -->
+    <section class="compound-engine card">
+      <div class="card-header">
+        <span class="dot dot-green"></span>
+        <span>AUTO-COMPOUND ENGINE</span>
+        <span class="spacer"></span>
+        <span class="dot dot-green"></span>
+        <span>ACTIVE</span>
+        <button id="compound-btn" class="btn btn-outline">TRIGGER COMPOUND →</button>
+      </div>
+      <div class="compound-stats">
+        <div class="compound-stat">
+          <div class="cs-label">CYCLE LENGTH</div>
+          <div class="cs-value">01:00:00</div>
+        </div>
+        <div class="compound-stat">
+          <div class="cs-label">NEXT COMPOUND</div>
+          <div class="cs-value" id="next-compound-time">00:59:59</div>
+        </div>
+        <div class="compound-stat">
+          <div class="cs-label">TOTAL CYCLES</div>
+          <div class="cs-value" id="total-cycles">0</div>
+        </div>
+        <div class="compound-stat">
+          <div class="cs-label">LAST TX HASH</div>
+          <div class="cs-value">
+            <a id="last-tx-hash" class="tx-link" href="#" target="_blank">-</a>
+          </div>
+        </div>
+      </div>
+      <div class="countdown-row">
+        <span class="countdown-label">NEXT AUTO-COMPOUND IN</span>
+        <div class="countdown">
+          <div class="countdown-unit">
+            <div class="countdown-num" id="countdown-hr">00</div>
+            <div class="countdown-unit-label">HRS</div>
+          </div>
+          <span class="countdown-sep">:</span>
+          <div class="countdown-unit">
+            <div class="countdown-num" id="countdown-min">59</div>
+            <div class="countdown-unit-label">MIN</div>
+          </div>
+          <span class="countdown-sep">:</span>
+          <div class="countdown-unit">
+            <div class="countdown-num" id="countdown-sec">59</div>
+            <div class="countdown-unit-label">SEC</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Stake / Unstake row -->
+    <div class="stake-row">
+      <!-- Stake -->
+      <section class="card stake-card">
+        <div class="card-header">
+          <span class="dot dot-green"></span>
+          <span>STAKE tBTC</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">AMOUNT TO STAKE (SATOSHIS)</label>
+          <div class="input-row">
+            <input
+              id="stake-amount"
+              type="number"
+              class="input"
+              placeholder="10000"
+              min="1000"
+            />
+            <button id="max-btn" class="btn btn-sm">MAX</button>
+          </div>
+          <div class="input-hint">
+            Wallet balance: <span id="wallet-balance-card">–</span> sats &nbsp;|&nbsp; Min: 1,000 sats
+          </div>
+        </div>
+
+        <div class="preview-row">
+          <div class="preview-item">
+            <div class="preview-label">YOU STAKE</div>
+            <div class="preview-value orange" id="you-stake-display">0 sats</div>
+          </div>
+          <div class="preview-item">
+            <div class="preview-label">EST. ANNUAL YIELD</div>
+            <div class="preview-value orange" id="annual-yield-display">+0 sats / yr</div>
+          </div>
+        </div>
+
+        <button id="stake-btn" class="btn btn-full btn-gold">STAKE tBTC</button>
+      </section>
+
+      <!-- Unstake -->
+      <section class="card unstake-card">
+        <div class="card-header">
+          <span class="dot dot-green"></span>
+          <span>UNSTAKE tBTC</span>
+        </div>
+
+        <div class="unstake-body" id="unstake-body">
+          <div class="lock-icon">🔓</div>
+          <div class="unstake-title">STAKE FIRST</div>
+          <div class="unstake-desc">You need a staked balance to withdraw from the vault.</div>
+          <button id="unstake-btn" class="btn btn-full btn-outline-red" disabled>
+            UNSTAKE tBTC
+          </button>
+        </div>
+
+        <!-- My position -->
+        <div class="position-section" id="position-section">
+          <div class="position-item">
+            <span class="pos-label">YOUR STAKE</span>
+            <span class="pos-value orange" id="user-staked">0 sats</span>
+          </div>
+          <div class="position-item">
+            <span class="pos-label">REWARDS EARNED</span>
+            <span class="pos-value green" id="my-rewards">0 sats</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- APY Breakdown -->
+    <section class="card apy-card">
+      <div class="card-header">
+        <span class="dot dot-green"></span>
+        <span>APY BREAKDOWN</span>
+      </div>
+      <div class="apy-body">
+        <div class="apy-donut-wrap">
+          <canvas id="apy-donut" width="140" height="140"></canvas>
+          <div class="apy-donut-center">
+            <span class="apy-big">18.3%</span>
+          </div>
+        </div>
+        <div class="apy-breakdown">
+          <div class="apy-title">Auto-Compound Rate</div>
+          <div class="apy-row">
+            <span>Base Yield / yr</span>
+            <span class="green">14.1%</span>
+          </div>
+          <div class="apy-row">
+            <span>Compound Bonus</span>
+            <span class="orange">+4.2%</span>
+          </div>
+          <div class="apy-row apy-total">
+            <span>Total APY</span>
+            <span class="orange">18.3%</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TX Log -->
+    <section class="card tx-card">
+      <div class="card-header">
+        <span class="dot dot-green"></span>
+        <span>TRANSACTION LOG</span>
+      </div>
+      <div id="tx-log" class="tx-log">
+        <div class="tx-empty">No transactions yet. Connect wallet and stake tBTC.</div>
+      </div>
+    </section>
+
+    <!-- Links -->
+    <section class="links-row">
+      <a href="https://docs.opnet.org" target="_blank" rel="noopener" class="link-btn">OP_NET DOCS</a>
+      <a href="https://opscan.org" target="_blank" rel="noopener" class="link-btn">OP_SCAN</a>
+      <a href="https://faucet.opnet.org" target="_blank" rel="noopener" class="link-btn">tBTC FAUCET</a>
+      <a href="https://chromewebstore.google.com/detail/opwallet/pmbjpcmaaladnfpacpmhmnfmpklgbdjb" target="_blank" rel="noopener" class="link-btn">INSTALL OP_WALLET</a>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>VAULT · Bitcoin Staking on OP_NET Testnet · MIT License</p>
+  </footer>
+
+  <script src="script.js"></script>
 </body>
 </html>
