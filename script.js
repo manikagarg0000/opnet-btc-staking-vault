@@ -1,4 +1,4 @@
-// ====================== OP_NET BTC STAKING VAULT - FINAL FIXED (100% WORKING) ======================
+// ====================== OP_NET BTC STAKING VAULT - FINAL WORKING VERSION ======================
 const VAULT = {
   connected: false,
   address: null,
@@ -11,20 +11,17 @@ const VAULT = {
 
 let provider = null;
 
-// ==================== PROVIDER ====================
 function getProvider() {
   if (typeof window.opnet !== 'undefined') return window.opnet;
   if (typeof window.unisat !== 'undefined') return window.unisat;
   throw new Error('OP Wallet not found');
 }
 
-// ==================== CONNECT WALLET ====================
 async function connectWallet() {
   try {
     provider = getProvider();
     await provider.requestAccounts();
     const accounts = await provider.getAccounts();
-
     VAULT.address = accounts[0];
     VAULT.connected = true;
 
@@ -39,22 +36,16 @@ async function connectWallet() {
   }
 }
 
-// ==================== BALANCE UPDATE (UI-তে দেখাবে) ====================
 async function refreshWalletBalance() {
   if (!VAULT.connected || !provider) return;
   try {
     const balance = await provider.getBalance();
     VAULT.walletBalSats = parseInt(balance?.total || balance || 0);
-
-    // UI-তে Wallet balance দেখাবে (stake box-এ)
-    const balEl = document.getElementById('walletBalance') || document.querySelector('.wallet-balance');
+    const balEl = document.getElementById('walletBalance');
     if (balEl) balEl.textContent = VAULT.walletBalSats.toLocaleString();
-
-    console.log('✅ Balance updated:', VAULT.walletBalSats);
   } catch (e) {}
 }
 
-// ==================== STAKE FUNCTION (FIXED - sats input) ====================
 async function stake() {
   if (!VAULT.connected) {
     toast('error', 'NOT CONNECTED', 'Connect OP Wallet first');
@@ -89,7 +80,6 @@ async function stake() {
     VAULT.totalStaked += amtSats;
     VAULT.lastTxHash = txid;
 
-    updateDashboard();
     toast('success', 'STAKE CONFIRMED!', 
       `Staked ${amtSats.toLocaleString()} sats\nTXID: ${txid.slice(0,22)}...`);
 
@@ -104,12 +94,6 @@ async function stake() {
   }
 }
 
-// ==================== HELPER ====================
-function updateDashboard() {
-  const totalEl = document.getElementById('totalStaked');
-  if (totalEl) totalEl.textContent = VAULT.totalStaked.toLocaleString();
-}
-
 function toast(type, title, msg) {
   const t = document.createElement('div');
   t.style.cssText = `position:fixed;bottom:30px;right:30px;padding:16px 22px;border-radius:12px;color:white;z-index:99999;box-shadow:0 10px 30px rgba(0,0,0,0.4);`;
@@ -119,7 +103,6 @@ function toast(type, title, msg) {
   setTimeout(() => t.remove(), 6000);
 }
 
-// ==================== INIT ====================
 document.addEventListener('DOMContentLoaded', () => {
   const connectBtn = document.getElementById('connectBtn');
   const stakeBtn = document.getElementById('stakeBtnEl');
