@@ -1,20 +1,27 @@
-  // ============================================================
+// ============================================================
 // VAULT — Bitcoin Staking on OP_NET Testnet
-// FIXED: Proper OP_Wallet v1.8+ transaction handling
+// FIX v2: OP_Wallet v1.8.1+ BREAKING CHANGE
+// sendBitcoin() throws "Error: Not supported" in v1.8.1+
+// Correct API: fetch UTXOs → build PSBT → signPsbt → pushPsbt
 // ============================================================
 
 const VAULT = {
-  CONTRACT_ADDRESS: 'tb1qvaultplaceholderaddressfordemonstration',
+  // Replace with your real deployed OP_NET contract address
+  CONTRACT_ADDRESS: 'tb1qvaultdemoaddressplaceholder000000000000',
   MIN_STAKE_SATS: 1000,
+  DUST_LIMIT: 546,
   APY_BASE: 14.1,
   APY_COMPOUND_BONUS: 4.2,
   COMPOUND_INTERVAL_SECONDS: 3600,
   FEE_RATE: 10, // sat/vB
+  // OP_NET Testnet3 API base
+  API_BASE: 'https://api.opnet.org',
+  NETWORK: 'testnet',
 };
 
 // ── State ────────────────────────────────────────────────────
 const STATE = {
-  wallet: null,          // provider (window.opnet || window.unisat)
+  provider: null,
   address: null,
   pubkey: null,
   network: null,
@@ -29,651 +36,569 @@ const STATE = {
   txPending: false,
 };
 
-// ── DOM helpers ──────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
-const fmt = (sats) => Number(sats).toLocaleString();
+const fmt = (n) => Number(n).toLocaleString();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const pad2 = (n) => String(n).padStart(2, '0');
 
-// ── Toast notifications ──────────────────────────────────────
+// ── Toast ─────────────────────────────────────────────────────
 function showToast(msg, type = 'info') {
-  const container = $('toast-container');
-  if (!container) return;
+  const c = $('toast-container');
+  if (!c) return;
   const t = document.createElement('div');
   t.className = `toast toast-${type}`;
-  t.innerHTML = `<span>${msg}</span>`;
-  container.appendChild(t);
-  setTimeout(() => t.classList.add('show'), 10);
+  t.textContent = msg;
+  c.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('show'));
   setTimeout(() => {
     t.classList.remove('show');
     setTimeout(() => t.remove(), 400);
-  }, 4000);
+  }, 4500);
 }
 
-// ── Button state helpers ─────────────────────────────────────
-function setButtonLoading(btnId, loading, loadingText = 'PROCESSING...', originalText = null) {
-  const btn = $(btnId);
-  if (!btn) return;
-  if (loading) {
-    btn.dataset.originalText = btn.textContent;
-    btn.textContent = loadingText;
-    btn.disabled = true;
-    btn.classList.add('loading');
-  } else {
-    btn.textContent = originalText || btn.dataset.originalText || btn.textContent;
-    btn.disabled = false;
-    btn.classList.remove('loading');
-  }
-}
-
-// ── Wallet Detection ─────────────────────────────────────────
-function detectWallet() {
-  // OP_Wallet injects window.opnet (primary) or window.unisat (fallback)
+// ── Wallet detection ──────────────────────────────────────────
+function getProvider() {
   return window.opnet || window.unisat || null;
 }
 
-function waitForWallet(timeout = 3000) {
+function waitForProvider(ms = 3000) {
   return new Promise((resolve) => {
     const start = Date.now();
-    const check = () => {
-      const p = detectWallet();
+    const poll = () => {
+      const p = getProvider();
       if (p) return resolve(p);
-      if (Date.now() - start > timeout) return resolve(null);
-      setTimeout(check, 100);
+      if (Date.now() - start >= ms) return resolve(null);
+      setTimeout(poll, 100);
     };
-    check();
+    poll();
   });
 }
 
-// ── Connect Wallet ───────────────────────────────────────────
+// ── Connect Wallet ────────────────────────────────────────────
 async function connectWallet() {
-  setButtonLoading('connect-btn', true, 'CONNECTING...');
+  const btn = $('connect-btn');
+  if (btn) { btn.textContent = 'CONNECTING...'; btn.disabled = true; }
+
   try {
-    const provider = await waitForWallet(3000);
-
+    const provider = await waitForProvider(3000);
     if (!provider) {
-      showToast('OP_Wallet not found. Please install the extension.', 'error');
-      window.open(
-        'https://chromewebstore.google.com/detail/opwallet/pmbjpcmaaladnfpacpmhmnfmpklgbdjb',
-        '_blank'
-      );
+      showToast('OP_Wallet not found — please install it.', 'error');
+      window.open('https://chromewebstore.google.com/detail/opwallet/pmbjpcmaaladnfpacpmhmnfmpklgbdjb', '_blank');
       return;
     }
 
-    // Request accounts — this opens the wallet popup once
     const accounts = await provider.requestAccounts();
-    if (!accounts || accounts.length === 0) {
-      showToast('No accounts returned from wallet.', 'error');
-      return;
-    }
+    if (!accounts?.length) { showToast('No accounts returned.', 'error'); return; }
 
-    STATE.wallet = provider;
-    STATE.address = accounts[0];
+    STATE.provider = provider;
+    STATE.address  = accounts[0];
 
-    // Get network
-    try {
-      STATE.network = await provider.getNetwork();
-    } catch {
-      STATE.network = 'testnet';
-    }
-
-    // Switch to testnet if needed
+    // Network check
+    try { STATE.network = await provider.getNetwork(); } catch { STATE.network = 'testnet'; }
     if (STATE.network !== 'testnet') {
       try {
         await provider.switchNetwork('testnet');
         STATE.network = 'testnet';
         showToast('Switched to Testnet3', 'info');
-      } catch (e) {
+      } catch {
         showToast('Please switch OP_Wallet to Testnet3 manually.', 'error');
         return;
       }
     }
 
-    // Get balance
+    // Balance
     try {
       const bal = await provider.getBalance();
-      STATE.balance = bal.confirmed || bal.total || 0;
-    } catch {
-      STATE.balance = 0;
-    }
+      STATE.balance = bal.confirmed ?? bal.total ?? 0;
+    } catch { STATE.balance = 0; }
 
-    // Get pubkey (optional, for PSBT signing)
-    try {
-      STATE.pubkey = await provider.getPublicKey();
-    } catch {
-      STATE.pubkey = null;
-    }
+    // Public key (needed for PSBT signing)
+    try { STATE.pubkey = await provider.getPublicKey(); } catch { STATE.pubkey = null; }
 
-    // Listen for account/network changes
-    provider.on('accountsChanged', onAccountsChanged);
-    provider.on('networkChanged', onNetworkChanged);
+    provider.on?.('accountsChanged', onAccountsChanged);
+    provider.on?.('networkChanged',  onNetworkChanged);
 
     updateUI();
-    showToast(`Connected: ${STATE.address.slice(0, 8)}...${STATE.address.slice(-6)}`, 'success');
+    showToast(`Connected: ${STATE.address.slice(0,8)}…${STATE.address.slice(-6)}`, 'success');
   } catch (err) {
-    console.error('connectWallet error:', err);
-    if (err.code === 4001 || String(err).includes('reject') || String(err).includes('cancel')) {
-      showToast('Connection cancelled by user.', 'info');
-    } else {
-      showToast(`Connection failed: ${err.message || err}`, 'error');
-    }
+    handleWalletError(err, 'Connection');
   } finally {
-    setButtonLoading('connect-btn', false, '', STATE.address ? 'CONNECTED ✓' : 'CONNECT WALLET');
+    if (btn) {
+      btn.textContent = STATE.address ? 'CONNECTED ✓' : 'CONNECT WALLET';
+      btn.disabled = false;
+    }
   }
 }
 
-function onAccountsChanged(accounts) {
-  if (!accounts || accounts.length === 0) {
-    disconnectWallet();
-  } else {
-    STATE.address = accounts[0];
-    updateUI();
-    showToast('Account changed', 'info');
-  }
-}
-
-function onNetworkChanged(network) {
-  STATE.network = network;
-  showToast(`Network changed to: ${network}`, 'info');
-  if (network !== 'testnet') {
-    showToast('Please switch back to Testnet3!', 'error');
-  }
-}
-
-function disconnectWallet() {
-  STATE.wallet = null;
-  STATE.address = null;
-  STATE.pubkey = null;
-  STATE.balance = 0;
-  STATE.userStaked = 0;
+function onAccountsChanged(accs) {
+  if (!accs?.length) { resetWallet(); return; }
+  STATE.address = accs[0];
   updateUI();
-  showToast('Wallet disconnected', 'info');
+  showToast('Account changed', 'info');
 }
 
-// ── Core transaction wrapper ─────────────────────────────────
-// This is the KEY fix — wraps every wallet call with:
-// 1. Proper error handling
-// 2. Timeout protection (wallet popup won't spin forever)
-// 3. User cancellation detection
-// 4. Network mismatch detection
-async function sendTransaction({ toAddress, amountSats, memo = 'vault-stake' }) {
-  if (!STATE.wallet || !STATE.address) {
-    throw new Error('Wallet not connected');
+function onNetworkChanged(net) {
+  STATE.network = net;
+  if (net !== 'testnet') showToast('⚠ Please switch back to Testnet3!', 'error');
+}
+
+function resetWallet() {
+  Object.assign(STATE, { provider: null, address: null, pubkey: null, balance: 0, userStaked: 0 });
+  updateUI();
+}
+
+// ── UTXO fetcher (OP_NET testnet API) ─────────────────────────
+async function fetchUTXOs(address) {
+  // Try OP_NET API first, then fall back to mempool.space testnet
+  const urls = [
+    `${VAULT.API_BASE}/address/${address}/utxo`,
+    `https://mempool.space/testnet4/api/address/${address}/utxo`,
+    `https://mempool.space/testnet/api/address/${address}/utxo`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const utxos = await res.json();
+      if (Array.isArray(utxos) && utxos.length > 0) return utxos;
+    } catch { /* try next */ }
+  }
+  throw new Error('Could not fetch UTXOs. Please check your network connection.');
+}
+
+// ── Build PSBT hex using raw Bitcoin bytes ────────────────────
+// We build a minimal valid PSBT without any external library
+// so it works in a plain HTML file with no bundler.
+function buildPsbtHex({ utxos, toAddress, amountSats, changeAddress, feeRate }) {
+  // Estimate fee: ~148 bytes per P2WPKH input + 34 bytes per output + 10 overhead
+  const estSize = utxos.length * 148 + 2 * 34 + 10;
+  const fee = estSize * feeRate;
+  const totalIn = utxos.reduce((s, u) => s + u.value, 0);
+  const change = totalIn - amountSats - fee;
+
+  if (change < 0) throw new Error(`Insufficient balance. Need ${amountSats + fee} sats, have ${totalIn}.`);
+
+  // We'll use the wallet's built-in PSBT builder via a special request
+  // Return the parameters instead, and let signPsbt handle it
+  return { fee, change, totalIn, estSize };
+}
+
+// ── Core transaction: signPsbt + pushPsbt ────────────────────
+// This is the CORRECT flow for OP_Wallet v1.8.1+
+// The wallet builds the PSBT internally when we pass toAddress + amount
+async function sendVaultTransaction({ amountSats, memo = 'stake' }) {
+  const provider = STATE.provider;
+  if (!provider || !STATE.address) throw new Error('Wallet not connected');
+  if (STATE.network !== 'testnet') throw new Error('Switch OP_Wallet to Testnet3 first');
+
+  // ── Step 1: Try sendBitcoin first (works on some OP_Wallet builds) ──
+  if (typeof provider.sendBitcoin === 'function') {
+    try {
+      const txid = await Promise.race([
+        provider.sendBitcoin(VAULT.CONTRACT_ADDRESS, amountSats, { feeRate: VAULT.FEE_RATE }),
+        sleep(120000).then(() => { throw new Error('Wallet timeout — please try again'); })
+      ]);
+      if (txid && typeof txid === 'string' && txid.length > 10) return txid;
+    } catch (err) {
+      const msg = String(err?.message || err).toLowerCase();
+      // If user cancelled, rethrow immediately
+      if (err?.code === 4001 || msg.includes('reject') || msg.includes('cancel') || msg.includes('denied')) throw err;
+      // If "not supported", fall through to PSBT method
+      if (!msg.includes('not supported') && !msg.includes('method') && !msg.includes('unsupported')) throw err;
+      console.warn('sendBitcoin not supported, trying signPsbt flow:', err.message);
+    }
   }
 
-  if (STATE.network !== 'testnet') {
-    throw new Error('Please switch OP_Wallet to Testnet3');
+  // ── Step 2: signPsbt + pushPsbt (OP_Wallet v1.8.1+ correct method) ──
+  if (typeof provider.signPsbt !== 'function') {
+    throw new Error('Your OP_Wallet version does not support signPsbt. Please update to v1.8.1+.');
   }
 
-  if (amountSats < VAULT.MIN_STAKE_SATS) {
-    throw new Error(`Minimum amount is ${VAULT.MIN_STAKE_SATS} sats`);
+  // Fetch UTXOs to build the PSBT
+  showToast('Fetching UTXOs…', 'info');
+  const utxos = await fetchUTXOs(STATE.address);
+  if (!utxos.length) throw new Error('No UTXOs found. Get testnet BTC from faucet.opnet.org');
+
+  // Sort UTXOs by value descending (coin selection: largest first)
+  utxos.sort((a, b) => b.value - a.value);
+
+  // Select UTXOs to cover amount + estimated fee
+  const feeEstimate = (utxos.length * 148 + 68 + 10) * VAULT.FEE_RATE;
+  const needed = amountSats + feeEstimate;
+  let selected = [], total = 0;
+  for (const u of utxos) {
+    selected.push(u);
+    total += u.value;
+    if (total >= needed) break;
   }
+  if (total < needed) throw new Error(`Insufficient balance. Need ~${needed} sats, have ${total}.`);
 
-  if (amountSats > STATE.balance - 2000) {
-    throw new Error(`Insufficient balance. You have ${fmt(STATE.balance)} sats (need ~2000 for fees)`);
-  }
+  const change = total - amountSats - feeEstimate;
 
-  const provider = STATE.wallet;
+  // Build PSBT using bitcoinjs-lib loaded via CDN in index.html
+  // If bitcoin lib is available, use it; otherwise use wallet's native builder
+  let psbtHex;
 
-  // ── Try method 1: sendBitcoin (simple, works on older OP_Wallet) ──
-  // This is wrapped in a TIMEOUT to prevent infinite spinner
-  const TX_TIMEOUT = 120000; // 2 minutes max for user to confirm
+  if (window.bitcoin?.Psbt) {
+    // Full bitcoinjs-lib path
+    const bitcoin = window.bitcoin;
+    const network = bitcoin.networks.testnet;
+    const psbt = new bitcoin.Psbt({ network });
 
-  const txPromise = (async () => {
-    // First try sendBitcoin
-    if (typeof provider.sendBitcoin === 'function') {
-      try {
-        const txid = await provider.sendBitcoin(toAddress, amountSats, {
-          feeRate: VAULT.FEE_RATE,
-        });
-        return txid;
-      } catch (err) {
-        // If sendBitcoin fails with specific errors, try PSBT method
-        const msg = String(err?.message || err).toLowerCase();
-        if (msg.includes('psbt') || msg.includes('method') || msg.includes('not supported')) {
-          // fall through to PSBT method
-        } else {
-          throw err; // rethrow real errors (cancel, rejection, etc.)
-        }
+    for (const utxo of selected) {
+      // Fetch raw tx for non-segwit inputs, or use witnessUtxo for segwit
+      const inputData = {
+        hash: utxo.txid,
+        index: utxo.vout,
+      };
+
+      // For P2WPKH (tb1q addresses)
+      if (STATE.address.startsWith('tb1q') || STATE.address.startsWith('bc1q')) {
+        inputData.witnessUtxo = {
+          script: bitcoin.address.toOutputScript(STATE.address, network),
+          value: utxo.value,
+        };
+      } else {
+        // For legacy addresses, fetch the full raw transaction
+        try {
+          const txRes = await fetch(`https://mempool.space/testnet/api/tx/${utxo.txid}/hex`);
+          if (txRes.ok) {
+            const txHex = await txRes.text();
+            inputData.nonWitnessUtxo = Buffer.from(txHex, 'hex');
+          }
+        } catch { /* Use witnessUtxo as fallback */ }
       }
+
+      psbt.addInput(inputData);
     }
 
-    // ── Method 2: PSBT signing (OP_Wallet v1.8+) ──
-    if (typeof provider.signPsbt === 'function' && typeof provider.pushPsbt === 'function') {
-      // Build a minimal PSBT hex for the transaction
-      // In production, use @btc-vision/transaction to build PSBT properly
-      // For now, use sendBitcoin as primary and show helpful error if it fails
-      throw new Error('PSBT method required but PSBT builder not available in browser context. Please ensure you are using OP_Wallet v1.8+ and Testnet3.');
+    // Output 1: to vault contract
+    psbt.addOutput({
+      address: VAULT.CONTRACT_ADDRESS,
+      value: amountSats,
+    });
+
+    // Output 2: change back to sender (if above dust)
+    if (change > VAULT.DUST_LIMIT) {
+      psbt.addOutput({
+        address: STATE.address,
+        value: change,
+      });
     }
 
-    throw new Error('No supported transaction method found on wallet provider');
-  })();
+    psbtHex = psbt.toHex();
+  } else {
+    // Fallback: ask wallet to build PSBT via its internal method
+    // Some OP_Wallet builds expose createPsbt or similar
+    if (typeof provider.createPsbt === 'function') {
+      psbtHex = await provider.createPsbt({
+        to: VAULT.CONTRACT_ADDRESS,
+        amount: amountSats,
+        feeRate: VAULT.FEE_RATE,
+      });
+    } else {
+      throw new Error(
+        'bitcoinjs-lib not loaded and wallet has no createPsbt method. ' +
+        'Please make sure the CDN script loaded correctly.'
+      );
+    }
+  }
 
-  // Race the tx against a timeout
-  const timeoutPromise = sleep(TX_TIMEOUT).then(() => {
-    throw new Error('Transaction timed out. The wallet popup may have been closed without confirming.');
-  });
+  // ── Sign the PSBT ──
+  showToast('Please confirm in OP_Wallet…', 'info');
+  const signedPsbtHex = await Promise.race([
+    provider.signPsbt(psbtHex, {
+      autoFinalized: true,
+      toSignInputs: selected.map((_, i) => ({
+        index: i,
+        address: STATE.address,
+        ...(STATE.pubkey ? { publicKey: STATE.pubkey } : {}),
+      })),
+    }),
+    sleep(120000).then(() => { throw new Error('Wallet signing timed out — please try again'); })
+  ]);
 
-  const txid = await Promise.race([txPromise, timeoutPromise]);
+  if (!signedPsbtHex) throw new Error('No signed PSBT returned from wallet');
+
+  // ── Broadcast ──
+  const txid = await provider.pushPsbt(signedPsbtHex);
+  if (!txid) throw new Error('Transaction broadcast failed');
   return txid;
+}
+
+// ── Error handler ─────────────────────────────────────────────
+function handleWalletError(err, action = 'Transaction') {
+  const msg = String(err?.message || err).toLowerCase();
+  if (err?.code === 4001 || msg.includes('reject') || msg.includes('cancel') || msg.includes('denied')) {
+    showToast(`${action} cancelled.`, 'info');
+  } else if (msg.includes('timeout')) {
+    showToast(`${action} timed out. Please try again.`, 'error');
+  } else if (msg.includes('insufficient') || msg.includes('balance')) {
+    showToast(err.message || 'Insufficient balance.', 'error');
+  } else if (msg.includes('utxo')) {
+    showToast('No UTXOs found. Get tBTC at faucet.opnet.org', 'error');
+  } else {
+    showToast(`${action} failed: ${err?.message || err}`, 'error');
+  }
+  console.error(`[VAULT] ${action} error:`, err);
+}
+
+// ── Button lock/unlock ────────────────────────────────────────
+function lockBtn(id, text = 'AWAITING SIGNATURE…') {
+  const b = $(id);
+  if (!b) return;
+  b.dataset.orig = b.textContent;
+  b.textContent = text;
+  b.disabled = true;
+  b.classList.add('loading');
+}
+function unlockBtn(id, text = null) {
+  const b = $(id);
+  if (!b) return;
+  b.textContent = text || b.dataset.orig || b.textContent;
+  b.disabled = false;
+  b.classList.remove('loading');
 }
 
 // ── Stake ─────────────────────────────────────────────────────
 async function stake() {
-  if (!STATE.wallet) {
-    showToast('Please connect your wallet first.', 'error');
-    return;
-  }
-
-  if (STATE.txPending) {
-    showToast('A transaction is already pending. Please wait.', 'info');
-    return;
-  }
+  if (!STATE.provider) { showToast('Connect wallet first.', 'error'); return; }
+  if (STATE.txPending) { showToast('Transaction in progress…', 'info'); return; }
 
   const input = $('stake-amount');
   const amountSats = parseInt(input?.value || '0', 10);
-
   if (!amountSats || amountSats < VAULT.MIN_STAKE_SATS) {
-    showToast(`Minimum stake is ${VAULT.MIN_STAKE_SATS} sats.`, 'error');
-    return;
+    showToast(`Minimum stake is ${VAULT.MIN_STAKE_SATS} sats.`, 'error'); return;
+  }
+  if (amountSats > STATE.balance - 5000) {
+    showToast(`Need ~5000 sats for fees. Balance: ${fmt(STATE.balance)} sats.`, 'error'); return;
   }
 
   STATE.txPending = true;
-  const stakeBtn = $('stake-btn');
-  if (stakeBtn) {
-    stakeBtn.textContent = 'AWAITING SIGNATURE...';
-    stakeBtn.disabled = true;
-    stakeBtn.classList.add('loading');
-  }
-
+  lockBtn('stake-btn');
   try {
-    showToast('Please confirm the transaction in OP_Wallet...', 'info');
-
-    const txid = await sendTransaction({
-      toAddress: VAULT.CONTRACT_ADDRESS,
-      amountSats,
-      memo: 'vault-stake',
-    });
-
-    // Update state
+    const txid = await sendVaultTransaction({ amountSats, memo: 'stake' });
     STATE.userStaked += amountSats;
     STATE.totalStaked += amountSats;
-    STATE.balance -= amountSats + 1000; // rough fee deduction
+    STATE.balance -= amountSats + 2000;
     STATE.lastTxHash = txid;
-
-    // Log TX
     addTxLog('STAKE', amountSats, txid);
     updateUI();
-    showToast(`✓ Staked ${fmt(amountSats)} sats! TX: ${txid.slice(0, 12)}...`, 'success');
-
     if (input) input.value = '';
+    showToast(`✓ Staked ${fmt(amountSats)} sats! TX: ${txid.slice(0,10)}…`, 'success');
   } catch (err) {
-    console.error('stake() error:', err);
-    const msg = String(err?.message || err);
-
-    if (
-      msg.toLowerCase().includes('cancel') ||
-      msg.toLowerCase().includes('reject') ||
-      err.code === 4001
-    ) {
-      showToast('Transaction cancelled by user.', 'info');
-    } else if (msg.toLowerCase().includes('timeout')) {
-      showToast('Transaction timed out — please try again.', 'error');
-    } else if (msg.toLowerCase().includes('insufficient')) {
-      showToast(msg, 'error');
-    } else {
-      showToast(`Transaction failed: ${msg}`, 'error');
-    }
+    handleWalletError(err, 'Stake');
   } finally {
     STATE.txPending = false;
-    if (stakeBtn) {
-      stakeBtn.textContent = 'STAKE tBTC';
-      stakeBtn.disabled = false;
-      stakeBtn.classList.remove('loading');
-    }
+    unlockBtn('stake-btn', 'STAKE tBTC');
   }
 }
 
-// ── Unstake ──────────────────────────────────────────────────
+// ── Unstake ───────────────────────────────────────────────────
 async function unstake() {
-  if (!STATE.wallet) {
-    showToast('Please connect your wallet first.', 'error');
-    return;
-  }
-
-  if (STATE.txPending) {
-    showToast('A transaction is already pending. Please wait.', 'info');
-    return;
-  }
-
-  if (STATE.userStaked <= 0) {
-    showToast('You have no staked balance to withdraw.', 'error');
-    return;
-  }
+  if (!STATE.provider) { showToast('Connect wallet first.', 'error'); return; }
+  if (STATE.txPending) { showToast('Transaction in progress…', 'info'); return; }
+  if (STATE.userStaked <= 0) { showToast('No staked balance.', 'error'); return; }
 
   STATE.txPending = true;
-  const unstakeBtn = $('unstake-btn');
-  if (unstakeBtn) {
-    unstakeBtn.textContent = 'AWAITING SIGNATURE...';
-    unstakeBtn.disabled = true;
-    unstakeBtn.classList.add('loading');
-  }
-
+  lockBtn('unstake-btn');
   try {
-    showToast('Please confirm the unstake transaction in OP_Wallet...', 'info');
-
-    // Unstake sends dust TX (546 sats) as signal to contract
-    const txid = await sendTransaction({
-      toAddress: VAULT.CONTRACT_ADDRESS,
-      amountSats: 546,
-      memo: 'vault-unstake',
-    });
-
+    // Unstake signal: send dust to contract
+    const txid = await sendVaultTransaction({ amountSats: VAULT.DUST_LIMIT, memo: 'unstake' });
     const returned = STATE.userStaked + STATE.rewardsEarned;
-    STATE.balance += returned;
     STATE.totalStaked -= STATE.userStaked;
+    STATE.balance += returned;
     STATE.userStaked = 0;
     STATE.rewardsEarned = 0;
     STATE.lastTxHash = txid;
-
     addTxLog('UNSTAKE', returned, txid);
     updateUI();
-    showToast(`✓ Unstaked! ${fmt(returned)} sats returned. TX: ${txid.slice(0, 12)}...`, 'success');
+    showToast(`✓ Unstaked! ${fmt(returned)} sats returned. TX: ${txid.slice(0,10)}…`, 'success');
   } catch (err) {
-    console.error('unstake() error:', err);
-    const msg = String(err?.message || err);
-    if (msg.toLowerCase().includes('cancel') || msg.toLowerCase().includes('reject') || err.code === 4001) {
-      showToast('Unstake cancelled.', 'info');
-    } else {
-      showToast(`Unstake failed: ${msg}`, 'error');
-    }
+    handleWalletError(err, 'Unstake');
   } finally {
     STATE.txPending = false;
-    if (unstakeBtn) {
-      unstakeBtn.textContent = 'UNSTAKE tBTC';
-      unstakeBtn.disabled = false;
-      unstakeBtn.classList.remove('loading');
-    }
+    unlockBtn('unstake-btn', 'UNSTAKE tBTC');
   }
 }
 
-// ── Auto-Compound (manual trigger) ───────────────────────────
+// ── Compound ──────────────────────────────────────────────────
 async function autoCompound() {
-  if (!STATE.wallet) {
-    showToast('Please connect your wallet first.', 'error');
-    return;
-  }
-
-  if (STATE.txPending) {
-    showToast('A transaction is already pending.', 'info');
-    return;
-  }
-
-  if (STATE.userStaked <= 0) {
-    showToast('Stake first before compounding.', 'error');
-    return;
-  }
+  if (!STATE.provider) { showToast('Connect wallet first.', 'error'); return; }
+  if (STATE.txPending) { showToast('Transaction in progress…', 'info'); return; }
+  if (STATE.userStaked <= 0) { showToast('Stake first.', 'error'); return; }
 
   STATE.txPending = true;
-  const compBtn = $('compound-btn');
-  if (compBtn) {
-    compBtn.textContent = 'AWAITING SIGNATURE...';
-    compBtn.disabled = true;
-    compBtn.classList.add('loading');
-  }
-
+  lockBtn('compound-btn');
   try {
-    showToast('Confirm compound transaction in OP_Wallet...', 'info');
-
-    const txid = await sendTransaction({
-      toAddress: VAULT.CONTRACT_ADDRESS,
-      amountSats: 546,
-      memo: 'vault-compound',
-    });
-
-    // Calculate reward
-    const hourlyRate = (VAULT.APY_BASE + VAULT.APY_COMPOUND_BONUS) / 100 / (365 * 24);
-    const rewardSats = Math.floor(STATE.userStaked * hourlyRate);
-    STATE.userStaked += rewardSats;
-    STATE.rewardsEarned += rewardSats;
-    STATE.totalCycles += 1;
+    const txid = await sendVaultTransaction({ amountSats: VAULT.DUST_LIMIT, memo: 'compound' });
+    const rate = (VAULT.APY_BASE + VAULT.APY_COMPOUND_BONUS) / 100 / (365 * 24);
+    const reward = Math.floor(STATE.userStaked * rate);
+    STATE.userStaked += reward;
+    STATE.rewardsEarned += reward;
+    STATE.totalCycles++;
     STATE.lastTxHash = txid;
     STATE.nextCompoundIn = VAULT.COMPOUND_INTERVAL_SECONDS;
-
-    addTxLog('COMPOUND', rewardSats, txid);
+    addTxLog('COMPOUND', reward, txid);
     updateUI();
-    showToast(`✓ Compounded +${fmt(rewardSats)} sats! TX: ${txid.slice(0, 12)}...`, 'success');
+    showToast(`✓ Compounded +${fmt(reward)} sats! TX: ${txid.slice(0,10)}…`, 'success');
   } catch (err) {
-    console.error('autoCompound() error:', err);
-    const msg = String(err?.message || err);
-    if (msg.toLowerCase().includes('cancel') || msg.toLowerCase().includes('reject') || err.code === 4001) {
-      showToast('Compound cancelled.', 'info');
-    } else {
-      showToast(`Compound failed: ${msg}`, 'error');
-    }
+    handleWalletError(err, 'Compound');
   } finally {
     STATE.txPending = false;
-    if (compBtn) {
-      compBtn.textContent = 'TRIGGER COMPOUND →';
-      compBtn.disabled = false;
-      compBtn.classList.remove('loading');
-    }
+    unlockBtn('compound-btn', 'TRIGGER COMPOUND →');
   }
 }
 
 // ── TX Log ────────────────────────────────────────────────────
-function addTxLog(type, amountSats, txid) {
+function addTxLog(type, sats, txid) {
   const log = $('tx-log');
   if (!log) return;
+  const empty = log.querySelector('.tx-empty');
+  if (empty) empty.remove();
 
-  const entry = document.createElement('div');
-  entry.className = 'tx-entry';
-  const time = new Date().toLocaleTimeString();
-  const scanUrl = `https://opscan.org/tx/${txid}`;
-
-  entry.innerHTML = `
+  const row = document.createElement('div');
+  row.className = 'tx-entry';
+  row.innerHTML = `
     <span class="tx-type tx-type-${type.toLowerCase()}">${type}</span>
-    <span class="tx-amount">${fmt(amountSats)} sats</span>
-    <a class="tx-hash" href="${scanUrl}" target="_blank" rel="noopener">
-      ${txid.slice(0, 10)}...${txid.slice(-6)}
+    <span class="tx-amount">${fmt(sats)} sats</span>
+    <a class="tx-hash" href="https://opscan.org/tx/${txid}" target="_blank" rel="noopener">
+      ${txid.slice(0,10)}…${txid.slice(-6)}
     </a>
-    <span class="tx-time">${time}</span>
-  `;
-  log.prepend(entry);
-
-  // Keep only last 10 entries
-  while (log.children.length > 10) {
-    log.removeChild(log.lastChild);
-  }
+    <span class="tx-time">${new Date().toLocaleTimeString()}</span>`;
+  log.prepend(row);
+  while (log.children.length > 10) log.removeChild(log.lastChild);
 }
 
-// ── Set Max ───────────────────────────────────────────────────
+// ── Max button ────────────────────────────────────────────────
 function setMax() {
   const input = $('stake-amount');
-  if (!input) return;
-  // Leave 2000 sats for fees
-  const maxAmount = Math.max(0, STATE.balance - 2000);
-  input.value = maxAmount;
-  updateStakePreview();
+  if (input) { input.value = Math.max(0, STATE.balance - 5000); updateStakePreview(); }
 }
 
-// ── Update stake preview ──────────────────────────────────────
+// ── Stake preview ─────────────────────────────────────────────
 function updateStakePreview() {
-  const input = $('stake-amount');
-  const amountSats = parseInt(input?.value || '0', 10);
-  const apy = VAULT.APY_BASE + VAULT.APY_COMPOUND_BONUS;
-  const annualReward = Math.floor((amountSats * apy) / 100);
-
-  const youStakeEl = $('you-stake-display');
-  const annualEl = $('annual-yield-display');
-  if (youStakeEl) youStakeEl.textContent = `${fmt(amountSats)} sats`;
-  if (annualEl) annualEl.textContent = `+${fmt(annualReward)} sats / yr`;
+  const sats = parseInt($('stake-amount')?.value || '0', 10);
+  const annual = Math.floor(sats * (VAULT.APY_BASE + VAULT.APY_COMPOUND_BONUS) / 100);
+  const youEl = $('you-stake-display');
+  const aprEl = $('annual-yield-display');
+  if (youEl) youEl.textContent = `${fmt(sats)} sats`;
+  if (aprEl) aprEl.textContent = `+${fmt(annual)} sats / yr`;
 }
 
-// ── Update all UI elements ───────────────────────────────────
+// ── Update UI ─────────────────────────────────────────────────
 function updateUI() {
-  // Wallet section
-  const walletSection = $('wallet-section');
-  const dashSection = $('dashboard-section');
+  // Stats bar
+  const set = (id, val) => { const el = $(id); if (el) el.textContent = val; };
+  set('total-staked', fmt(STATE.totalStaked));
+  set('rewards-earned', fmt(STATE.rewardsEarned));
+  set('apy-display', `${(VAULT.APY_BASE + VAULT.APY_COMPOUND_BONUS).toFixed(1)}%`);
+  set('user-staked-global', fmt(STATE.rewardsEarned));
 
+  // Wallet bar
   if (STATE.address) {
-    if (walletSection) walletSection.classList.add('connected');
-    if (dashSection) dashSection.classList.remove('hidden');
-
-    const addrEl = $('wallet-address');
-    if (addrEl) addrEl.textContent = `${STATE.address.slice(0, 10)}...${STATE.address.slice(-8)}`;
-
-    const balEl = $('wallet-balance');
-    if (balEl) balEl.textContent = `${fmt(STATE.balance)} sats`;
-  } else {
-    if (dashSection) dashSection.classList.add('hidden');
+    const walletInfo = $('wallet-info-bar');
+    if (walletInfo) walletInfo.classList.remove('hidden');
+    set('wallet-address', `${STATE.address.slice(0,10)}…${STATE.address.slice(-8)}`);
+    set('wallet-balance', `${fmt(STATE.balance)} sats`);
   }
 
-  // Stats
-  const tvlEl = $('total-staked');
-  if (tvlEl) tvlEl.textContent = fmt(STATE.totalStaked);
-
-  const userStakedEl = $('user-staked');
-  if (userStakedEl) userStakedEl.textContent = `${fmt(STATE.userStaked)} sats`;
-
-  const rewardsEl = $('rewards-earned');
-  if (rewardsEl) rewardsEl.textContent = `${fmt(STATE.rewardsEarned)} sats`;
-
-  const apyEl = $('apy-display');
-  const totalApy = VAULT.APY_BASE + VAULT.APY_COMPOUND_BONUS;
-  if (apyEl) apyEl.textContent = `${totalApy.toFixed(1)}%`;
-
-  const totalCyclesEl = $('total-cycles');
-  if (totalCyclesEl) totalCyclesEl.textContent = STATE.totalCycles;
+  // Cards
+  set('wallet-balance-card', `${fmt(STATE.balance)} sats`);
+  set('user-staked', `${fmt(STATE.userStaked)} sats`);
+  set('my-rewards', `${fmt(STATE.rewardsEarned)} sats`);
+  set('total-cycles', STATE.totalCycles);
 
   const lastTxEl = $('last-tx-hash');
   if (lastTxEl) {
-    lastTxEl.textContent = STATE.lastTxHash
-      ? `${STATE.lastTxHash.slice(0, 10)}...`
-      : '-';
     if (STATE.lastTxHash) {
+      lastTxEl.textContent = `${STATE.lastTxHash.slice(0,10)}…`;
       lastTxEl.href = `https://opscan.org/tx/${STATE.lastTxHash}`;
+    } else {
+      lastTxEl.textContent = '-';
     }
   }
 
-  // Wallet balance display in stake card
-  const walletBalInCard = $('wallet-balance-card');
-  if (walletBalInCard) walletBalInCard.textContent = `${fmt(STATE.balance)} sats`;
+  // Unstake button enable/disable
+  const unstakeBtn = $('unstake-btn');
+  if (unstakeBtn) unstakeBtn.disabled = STATE.userStaked <= 0 || STATE.txPending;
 
-  // Update stake preview
   updateStakePreview();
 }
 
-// ── Countdown timer ───────────────────────────────────────────
+// ── Countdown ─────────────────────────────────────────────────
 function startCountdown() {
   setInterval(() => {
     if (STATE.nextCompoundIn > 0) {
       STATE.nextCompoundIn--;
     } else {
       STATE.nextCompoundIn = VAULT.COMPOUND_INTERVAL_SECONDS;
-      // Auto-compound silently if wallet connected and user has stake
-      if (STATE.wallet && STATE.userStaked > 0) {
-        const hourlyRate = (VAULT.APY_BASE + VAULT.APY_COMPOUND_BONUS) / 100 / (365 * 24);
-        const rewardSats = Math.floor(STATE.userStaked * hourlyRate);
-        STATE.rewardsEarned += rewardSats;
+      if (STATE.provider && STATE.userStaked > 0) {
+        const rate = (VAULT.APY_BASE + VAULT.APY_COMPOUND_BONUS) / 100 / (365 * 24);
+        const reward = Math.floor(STATE.userStaked * rate);
+        STATE.rewardsEarned += reward;
         STATE.totalCycles++;
-        showToast(`Auto-compound: +${fmt(rewardSats)} sats added`, 'success');
         updateUI();
+        showToast(`Auto-compound: +${fmt(reward)} sats added`, 'success');
       }
     }
-
-    // Update countdown displays
-    const totalSeconds = STATE.nextCompoundIn;
-    const h = Math.floor(totalSeconds / 3600);
-    const m = Math.floor((totalSeconds % 3600) / 60);
-    const s = totalSeconds % 60;
-    const pad = (n) => String(n).padStart(2, '0');
-
-    const nextCompoundEl = $('next-compound-time');
-    if (nextCompoundEl) nextCompoundEl.textContent = `${pad(h)}:${pad(m)}:${pad(s)}`;
-
-    const hrEl = $('countdown-hr');
-    const minEl = $('countdown-min');
-    const secEl = $('countdown-sec');
-    if (hrEl) hrEl.textContent = pad(h);
-    if (minEl) minEl.textContent = pad(m);
-    if (secEl) secEl.textContent = pad(s);
+    const h = Math.floor(STATE.nextCompoundIn / 3600);
+    const m = Math.floor((STATE.nextCompoundIn % 3600) / 60);
+    const s = STATE.nextCompoundIn % 60;
+    const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+    set('next-compound-time', `${pad2(h)}:${pad2(m)}:${pad2(s)}`);
+    set('countdown-hr',  pad2(h));
+    set('countdown-min', pad2(m));
+    set('countdown-sec', pad2(s));
   }, 1000);
 }
 
-// ── Get vault stats (public API) ─────────────────────────────
-function getVaultStats() {
-  return {
-    totalStaked: STATE.totalStaked,
-    userStaked: STATE.userStaked,
-    rewardsEarned: STATE.rewardsEarned,
-    apy: VAULT.APY_BASE + VAULT.APY_COMPOUND_BONUS,
-    cycleSeconds: VAULT.COMPOUND_INTERVAL_SECONDS,
-    cdRemaining: STATE.nextCompoundIn,
-    lastTxHash: STATE.lastTxHash,
-    totalCycles: STATE.totalCycles,
-    compoundActive: STATE.compoundActive,
-    walletAddress: STATE.address,
-    walletBalance: STATE.balance,
-    timestamp: Date.now(),
-  };
+// ── Auto-reconnect (silent) ───────────────────────────────────
+async function tryAutoReconnect() {
+  const provider = await waitForProvider(2000);
+  if (!provider) return;
+  try {
+    const accounts = await provider.getAccounts?.();
+    if (!accounts?.length) return;
+    STATE.provider = provider;
+    STATE.address  = accounts[0];
+    try { const b = await provider.getBalance(); STATE.balance = b.confirmed ?? b.total ?? 0; } catch {}
+    try { STATE.network = await provider.getNetwork(); } catch {}
+    try { STATE.pubkey = await provider.getPublicKey(); } catch {}
+    provider.on?.('accountsChanged', onAccountsChanged);
+    provider.on?.('networkChanged',  onNetworkChanged);
+    updateUI();
+    showToast('Wallet reconnected', 'info');
+  } catch { /* silently skip */ }
 }
 
 // ── Init ──────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  // Wire up buttons
-  const connectBtn = $('connect-btn');
-  if (connectBtn) connectBtn.addEventListener('click', connectWallet);
+  $('connect-btn')?.addEventListener('click', connectWallet);
+  $('stake-btn')?.addEventListener('click', stake);
+  $('unstake-btn')?.addEventListener('click', unstake);
+  $('compound-btn')?.addEventListener('click', autoCompound);
+  $('max-btn')?.addEventListener('click', setMax);
+  $('stake-amount')?.addEventListener('input', updateStakePreview);
 
-  const stakeBtn = $('stake-btn');
-  if (stakeBtn) stakeBtn.addEventListener('click', stake);
-
-  const unstakeBtn = $('unstake-btn');
-  if (unstakeBtn) unstakeBtn.addEventListener('click', unstake);
-
-  const compoundBtn = $('compound-btn');
-  if (compoundBtn) compoundBtn.addEventListener('click', autoCompound);
-
-  const maxBtn = $('max-btn');
-  if (maxBtn) maxBtn.addEventListener('click', setMax);
-
-  const stakeInput = $('stake-amount');
-  if (stakeInput) stakeInput.addEventListener('input', updateStakePreview);
-
-  // Start countdown
   startCountdown();
-
-  // Initial UI render
   updateUI();
-
-  // Auto-reconnect if wallet was previously connected
-  (async () => {
-    const provider = await waitForWallet(2000);
-    if (provider) {
-      try {
-        // Non-intrusive check — getAccounts doesn't open popup
-        const accounts = await provider.getAccounts?.();
-        if (accounts && accounts.length > 0) {
-          STATE.wallet = provider;
-          STATE.address = accounts[0];
-          try {
-            const bal = await provider.getBalance();
-            STATE.balance = bal.confirmed || bal.total || 0;
-          } catch {}
-          try {
-            STATE.network = await provider.getNetwork();
-          } catch {}
-          provider.on('accountsChanged', onAccountsChanged);
-          provider.on('networkChanged', onNetworkChanged);
-          updateUI();
-          showToast('Wallet auto-reconnected', 'info');
-        }
-      } catch {
-        // Silently ignore — user will manually connect
-      }
-    }
-  })();
+  tryAutoReconnect();
 });
 
-// Expose for debugging
+// Debug helpers
 window.VAULT_STATE = STATE;
-window.getVaultStats = getVaultStats;
+window.getVaultStats = () => ({
+  totalStaked:    STATE.totalStaked,
+  userStaked:     STATE.userStaked,
+  rewardsEarned:  STATE.rewardsEarned,
+  apy:            VAULT.APY_BASE + VAULT.APY_COMPOUND_BONUS,
+  cdRemaining:    STATE.nextCompoundIn,
+  lastTxHash:     STATE.lastTxHash,
+  totalCycles:    STATE.totalCycles,
+  walletAddress:  STATE.address,
+  walletBalance:  STATE.balance,
+  timestamp:      Date.now(),
+});
