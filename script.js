@@ -1,39 +1,31 @@
-// ╔══════════════════════════════════════════════════════════════╗
-// ║       ║
-// ╚══════════════════════════════════════════════════════════════╝
-
 'use strict';
 
-// ─── CONFIG ──────────────────────────────────────────────────
-// ⚠️  IMPORTANT: Set VAULT_ADDRESS to your deployed OP_NET contract.
-//     Until you have one, leave it null → sends to your own wallet (safe test).
-//     Get a contract address: https://docs.opnet.org → Deploy a contract
-const CONFIG = {
-  VAULT_ADDRESS: 'opt1pttw57hg6gpav0dn5cvzjpcg2v7098j4jkyeej353str5w2r3d92qmyj3tc',   // null = self-send (demo mode). Set to real contract addr.
-  MIN_STAKE_SATS: 1000,
-  DUST_SATS: 600,
-  FEE_RATE: 5,
-  APY: 18.3,
-  APY_BASE: 14.1,
-  APY_BONUS: 4.2,
+// ── Config ────────────────────────────────────
+const CFG = {
+  VAULT: 'opt1pttw57hg6gpav0dn5cvzjpcg2v7098j4jkyeej353str5w2r3d92qmyj3tc',
+  MIN_SATS:   1000,
+  DUST_SATS:  600,
+  FEE_RATE:   5,
+  APY:        18.3,
   CYCLE_SECS: 3600,
 };
 
-// ─── STATE ────────────────────────────────────────────────────
+// ── State ─────────────────────────────────────
 const S = {
   p: null, addr: null, net: null,
-  balance: 0, staked: 0, rewards: 0,
+  bal: 0, staked: 0, rewards: 0,
   tvl: 48_230_108, cycles: 0, lastTx: null,
-  countdown: CONFIG.CYCLE_SECS, busy: false,
+  cd: CFG.CYCLE_SECS, busy: false,
 };
 
-// ─── HELPERS ──────────────────────────────────────────────────
-const el = (id) => document.getElementById(id);
-const setText = (id, v) => { const e = el(id); if (e) e.textContent = v; };
-const fmt = (n) => Number(n || 0).toLocaleString();
-const pad = (n) => String(n).padStart(2, '0');
+// ── Helpers ───────────────────────────────────
+const el   = id => document.getElementById(id);
+const set  = (id, v) => { const e = el(id); if (e) e.textContent = v; };
+const fmt  = n => Number(n || 0).toLocaleString();
+const pad  = n => String(n).padStart(2, '0');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// ─── TOAST ───────────────────────────────────────────────────
+// ── Toast ─────────────────────────────────────
 function toast(msg, type = 'info') {
   const c = el('toast-container');
   if (!c) return;
@@ -42,275 +34,279 @@ function toast(msg, type = 'info') {
   d.textContent = msg;
   c.appendChild(d);
   requestAnimationFrame(() => d.classList.add('show'));
-  setTimeout(() => { d.classList.remove('show'); setTimeout(() => d.remove(), 350); }, 4200);
+  setTimeout(() => {
+    d.classList.remove('show');
+    setTimeout(() => d.remove(), 300);
+  }, 4500);
 }
 
-// ─── PROVIDER ─────────────────────────────────────────────────
-function getProvider() {
-  return window.opnet || window.unisat || null;
-}
+// ── Provider ──────────────────────────────────
+const getProvider = () => window.opnet || window.unisat || null;
+
 async function waitProvider(ms = 3000) {
-  const t = Date.now() + ms;
-  while (Date.now() < t) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
     const p = getProvider();
     if (p) return p;
-    await new Promise(r => setTimeout(r, 100));
+    await sleep(100);
   }
   return null;
 }
 
-// ─── CONNECT WALLET ───────────────────────────────────────────
+// ── Connect ───────────────────────────────────
 async function connectWallet() {
   const btn = el('connect-btn');
   if (btn) { btn.textContent = 'CONNECTING...'; btn.disabled = true; }
+
   try {
-    const provider = await waitProvider(3000);
-    if (!provider) {
+    const p = await waitProvider(3000);
+    if (!p) {
       toast('OP_Wallet not found. Install it first.', 'error');
       window.open('https://chromewebstore.google.com/detail/opwallet/pmbjpcmaaladnfpacpmhmnfmpklgbdjb', '_blank');
       return;
     }
-    const accounts = await provider.requestAccounts();
-    if (!accounts?.length) { toast('No accounts.', 'error'); return; }
 
-    S.p = provider;
+    const accounts = await p.requestAccounts();
+    if (!accounts?.length) { toast('No accounts returned.', 'error'); return; }
+
+    S.p    = p;
     S.addr = accounts[0];
 
-    try { S.net = await provider.getNetwork(); } catch { S.net = 'testnet'; }
+    // Ensure testnet3
+    try { S.net = await p.getNetwork(); } catch { S.net = 'testnet'; }
     if (S.net !== 'testnet') {
-      try { await provider.switchNetwork('testnet'); S.net = 'testnet'; toast('Switched to Testnet3', 'info'); }
-      catch { toast('Please manually switch to Testnet3 in OP_Wallet.', 'error'); S.p = null; S.addr = null; return; }
+      try { await p.switchNetwork('testnet'); S.net = 'testnet'; toast('Switched to Testnet3', 'info'); }
+      catch { toast('Please switch OP_Wallet to Testnet3 manually.', 'error'); S.p = null; S.addr = null; return; }
     }
 
-    try { const b = await provider.getBalance(); S.balance = b.confirmed ?? b.total ?? 0; } catch {}
+    // Balance
+    try { const b = await p.getBalance(); S.bal = b.confirmed ?? b.total ?? 0; } catch {}
 
-    provider.on?.('accountsChanged', (a) => { S.addr = a?.[0] || null; renderUI(); });
-    provider.on?.('networkChanged', (n) => { S.net = n; if (n !== 'testnet') toast('Switch back to Testnet3!', 'error'); });
+    // Events
+    p.on?.('accountsChanged', a => { S.addr = a?.[0] || null; renderUI(); });
+    p.on?.('networkChanged', n => { S.net = n; if (n !== 'testnet') toast('Switch back to Testnet3!', 'error'); });
 
     renderUI();
     toast(`Connected: ${S.addr.slice(0,8)}…${S.addr.slice(-6)}`, 'success');
   } catch (err) {
-    handleError(err, 'Connect');
+    onErr(err, 'Connect');
   } finally {
     if (btn) { btn.textContent = S.addr ? 'CONNECTED ✓' : 'CONNECT WALLET'; btn.disabled = false; }
   }
 }
 
-// ─── SEND BTC — THE CORRECT OP_WALLET API ────────────────────
-// OP_Wallet (UniSat fork) exposes sendBitcoin on its provider.
-// This is THE correct method. The wallet builds+signs+broadcasts internally.
-// You must pass a VALID Bitcoin testnet address — any invalid addr causes infinite spinner.
-async function sendBTC(amountSats, label) {
+// ── Send BTC — correct OP_Wallet API ─────────
+// sendBitcoin is the right method (UniSat fork).
+// Wallet builds PSBT internally, shows popup, user confirms, returns txid.
+async function sendBTC(sats, label) {
   if (!S.p || !S.addr) throw new Error('Wallet not connected');
-  if (S.net !== 'testnet') throw new Error('Switch to Testnet3');
+  if (S.net !== 'testnet') throw new Error('Switch OP_Wallet to Testnet3');
 
-  // Use real contract OR fall back to self (your own address) for testing
-  const to = CONFIG.VAULT_ADDRESS || S.addr;
-
-  console.log(`[VAULT] ${label}: sending ${amountSats} sats → ${to}`);
   toast(`Confirm ${label} in OP_Wallet…`, 'info');
-
-  // This is correct. The wallet shows its popup, user confirms, returns txid.
-  const txid = await S.p.sendBitcoin(to, amountSats, { feeRate: CONFIG.FEE_RATE });
-
-  if (!txid || typeof txid !== 'string' || txid.length < 10) throw new Error('Invalid txid returned');
-  console.log(`[VAULT] txid: ${txid}`);
+  const txid = await S.p.sendBitcoin(CFG.VAULT, sats, { feeRate: CFG.FEE_RATE });
+  if (!txid || typeof txid !== 'string' || txid.length < 10) throw new Error('Bad txid returned');
   return txid;
 }
 
-// ─── STAKE ────────────────────────────────────────────────────
+// ── Stake ─────────────────────────────────────
 async function stake() {
-  if (!S.p) { toast('Connect wallet first.', 'error'); return; }
-  if (S.busy) { toast('Transaction already in progress.', 'info'); return; }
+  if (!S.p)    { toast('Connect wallet first.', 'error'); return; }
+  if (S.busy)  { toast('Transaction in progress…', 'info'); return; }
 
-  const input = el('stake-amount');
-  const sats = parseInt(input?.value || '0', 10);
-  if (!sats || sats < CONFIG.MIN_STAKE_SATS) { toast(`Min ${fmt(CONFIG.MIN_STAKE_SATS)} sats.`, 'error'); return; }
-  if (sats > S.balance - 3000) { toast(`Need 3000 sats for fees. Balance: ${fmt(S.balance)}.`, 'error'); return; }
+  const sats = parseInt(el('stake-input')?.value || '0', 10);
+  if (!sats || sats < CFG.MIN_SATS) { toast(`Minimum ${fmt(CFG.MIN_SATS)} sats.`, 'error'); return; }
+  if (sats > S.bal - 3000)          { toast(`Need 3000 sats for fees. Balance: ${fmt(S.bal)}.`, 'error'); return; }
 
   S.busy = true;
-  setLoading('stake-btn', true);
+  btnLoad('stake-btn');
   try {
     const txid = await sendBTC(sats, 'Stake');
-    S.staked += sats; S.tvl += sats; S.balance -= sats + 1500; S.lastTx = txid;
-    if (input) input.value = '';
-    addLog('STAKE', sats, txid);
+    S.staked += sats; S.tvl += sats; S.bal -= sats + 1500; S.lastTx = txid;
+    const inp = el('stake-input'); if (inp) inp.value = '';
+    logTx('STAKE', sats, txid);
     renderUI();
     toast(`✓ Staked ${fmt(sats)} sats!  TX: ${txid.slice(0,12)}…`, 'success');
-  } catch (err) { handleError(err, 'Stake'); }
-  finally { S.busy = false; setLoading('stake-btn', false, 'STAKE tBTC'); }
+  } catch (e) { onErr(e, 'Stake'); }
+  finally { S.busy = false; btnReset('stake-btn', 'STAKE tBTC'); }
 }
 
-// ─── UNSTAKE ──────────────────────────────────────────────────
+// ── Unstake ───────────────────────────────────
 async function unstake() {
-  if (!S.p) { toast('Connect wallet first.', 'error'); return; }
-  if (S.busy) { toast('Transaction in progress.', 'info'); return; }
-  if (S.staked <= 0) { toast('Nothing staked.', 'error'); return; }
+  if (!S.p)           { toast('Connect wallet first.', 'error'); return; }
+  if (S.busy)         { toast('Transaction in progress…', 'info'); return; }
+  if (S.staked <= 0)  { toast('Nothing staked.', 'error'); return; }
 
   S.busy = true;
-  setLoading('unstake-btn', true);
+  btnLoad('unstake-btn');
   try {
-    const txid = await sendBTC(CONFIG.DUST_SATS, 'Unstake');
-    const returned = S.staked + S.rewards;
-    S.tvl -= S.staked; S.balance += returned; S.staked = 0; S.rewards = 0; S.lastTx = txid;
-    addLog('UNSTAKE', returned, txid);
+    const txid = await sendBTC(CFG.DUST_SATS, 'Unstake');
+    const total = S.staked + S.rewards;
+    S.tvl -= S.staked; S.bal += total; S.staked = 0; S.rewards = 0; S.lastTx = txid;
+    logTx('UNSTAKE', total, txid);
     renderUI();
-    toast(`✓ Unstaked! ${fmt(returned)} sats back. TX: ${txid.slice(0,12)}…`, 'success');
-  } catch (err) { handleError(err, 'Unstake'); }
-  finally { S.busy = false; setLoading('unstake-btn', false, 'UNSTAKE tBTC'); }
+    toast(`✓ Unstaked! ${fmt(total)} sats returned.  TX: ${txid.slice(0,12)}…`, 'success');
+  } catch (e) { onErr(e, 'Unstake'); }
+  finally { S.busy = false; btnReset('unstake-btn', 'UNSTAKE tBTC'); }
 }
 
-// ─── COMPOUND ─────────────────────────────────────────────────
+// ── Compound ──────────────────────────────────
 async function compound() {
-  if (!S.p) { toast('Connect wallet first.', 'error'); return; }
-  if (S.busy) { toast('Transaction in progress.', 'info'); return; }
-  if (S.staked <= 0) { toast('Stake first.', 'error'); return; }
+  if (!S.p)           { toast('Connect wallet first.', 'error'); return; }
+  if (S.busy)         { toast('Transaction in progress…', 'info'); return; }
+  if (S.staked <= 0)  { toast('Stake first.', 'error'); return; }
 
   S.busy = true;
-  setLoading('compound-btn', true);
+  btnLoad('compound-btn');
   try {
-    const txid = await sendBTC(CONFIG.DUST_SATS, 'Compound');
-    const reward = Math.floor(S.staked * CONFIG.APY / 100 / (365 * 24));
-    S.staked += reward; S.rewards += reward; S.cycles++; S.lastTx = txid; S.countdown = CONFIG.CYCLE_SECS;
-    addLog('COMPOUND', reward, txid);
+    const txid = await sendBTC(CFG.DUST_SATS, 'Compound');
+    const reward = Math.floor(S.staked * CFG.APY / 100 / (365 * 24));
+    S.staked += reward; S.rewards += reward; S.cycles++; S.lastTx = txid; S.cd = CFG.CYCLE_SECS;
+    logTx('COMPOUND', reward, txid);
     renderUI();
-    toast(`✓ +${fmt(reward)} sats compounded. TX: ${txid.slice(0,12)}…`, 'success');
-  } catch (err) { handleError(err, 'Compound'); }
-  finally { S.busy = false; setLoading('compound-btn', false, 'TRIGGER COMPOUND →'); }
+    toast(`✓ +${fmt(reward)} sats compounded.  TX: ${txid.slice(0,12)}…`, 'success');
+  } catch (e) { onErr(e, 'Compound'); }
+  finally { S.busy = false; btnReset('compound-btn', 'TRIGGER COMPOUND →'); }
 }
 
-// ─── ERROR HANDLER ────────────────────────────────────────────
-function handleError(err, label) {
-  console.error(`[VAULT ${label}]`, err);
+// ── Error handler ─────────────────────────────
+function onErr(err, label) {
+  console.error(`[VAULT:${label}]`, err);
   const msg = String(err?.message || err).toLowerCase();
   if (err?.code === 4001 || msg.includes('reject') || msg.includes('cancel') || msg.includes('denied')) {
     toast(`${label} cancelled.`, 'info');
   } else if (msg.includes('not supported')) {
-    toast(`${label}: Method not supported. Update OP_Wallet to latest version.`, 'error');
+    toast(`${label}: Method not supported. Please update OP_Wallet.`, 'error');
   } else if (msg.includes('insufficient') || msg.includes('balance') || msg.includes('funds')) {
     toast(`Insufficient balance for ${label}.`, 'error');
-  } else if (msg.includes('address') || msg.includes('invalid')) {
-    toast('Invalid address — set a real contract address in CONFIG.VAULT_ADDRESS', 'error');
   } else {
-    toast(`${label} failed: ${err?.message || err}`, 'error');
+    toast(`${label} failed: ${err?.message || String(err)}`, 'error');
   }
 }
 
-// ─── BUTTON LOADING STATE ────────────────────────────────────
-function setLoading(id, loading, resetText = null) {
-  const b = el(id);
-  if (!b) return;
-  if (loading) {
-    b._orig = b.textContent;
-    b.textContent = 'AWAITING SIGNATURE…';
-    b.disabled = true;
-    b.classList.add('loading');
-  } else {
-    b.textContent = resetText || b._orig || b.textContent;
-    b.disabled = false;
-    b.classList.remove('loading');
-  }
+// ── Button loading ────────────────────────────
+function btnLoad(id) {
+  const b = el(id); if (!b) return;
+  b._orig = b.textContent;
+  b.textContent = 'AWAITING SIGNATURE…';
+  b.disabled = true;
+  b.classList.add('btn-loading');
+}
+function btnReset(id, text) {
+  const b = el(id); if (!b) return;
+  b.textContent = text || b._orig || b.textContent;
+  b.disabled = false;
+  b.classList.remove('btn-loading');
 }
 
-// ─── TX LOG ───────────────────────────────────────────────────
-function addLog(type, sats, txid) {
-  const log = el('tx-log');
-  if (!log) return;
+// ── TX Log ────────────────────────────────────
+function logTx(type, sats, txid) {
+  const log = el('tx-log'); if (!log) return;
   log.querySelector('.tx-empty')?.remove();
+  const typeClass = { STAKE: 'badge-stake', UNSTAKE: 'badge-unstake', COMPOUND: 'badge-compound' }[type] || '';
   const row = document.createElement('div');
-  row.className = 'tx-entry';
+  row.className = 'tx-row';
   row.innerHTML = `
-    <span class="tx-type tx-${type.toLowerCase()}">${type}</span>
-    <span class="tx-amt">${fmt(sats)} sats</span>
-    <a class="tx-id" href="https://opscan.org/tx/${txid}" target="_blank" rel="noopener">${txid.slice(0,10)}…${txid.slice(-6)}</a>
+    <span class="tx-badge ${typeClass}">${type}</span>
+    <span class="tx-sats">${fmt(sats)} sats</span>
+    <a class="tx-hash" href="https://opscan.org/tx/${txid}" target="_blank" rel="noopener">${txid.slice(0,10)}…${txid.slice(-6)}</a>
     <span class="tx-time">${new Date().toLocaleTimeString()}</span>`;
   log.prepend(row);
   while (log.children.length > 10) log.removeChild(log.lastChild);
 }
 
-// ─── MAX ──────────────────────────────────────────────────────
+// ── Max ───────────────────────────────────────
 function setMax() {
-  const i = el('stake-amount');
-  if (i) { i.value = Math.max(0, S.balance - 3000); updatePreview(); }
+  const i = el('stake-input');
+  if (i) { i.value = Math.max(0, S.bal - 3000); updatePreview(); }
 }
 
 function updatePreview() {
-  const sats = parseInt(el('stake-amount')?.value || '0', 10) || 0;
-  setText('you-stake-display', `${fmt(sats)} sats`);
-  setText('annual-yield-display', `+${fmt(Math.floor(sats * CONFIG.APY / 100))} sats / yr`);
+  const sats = parseInt(el('stake-input')?.value || '0', 10) || 0;
+  set('p-stake', `${fmt(sats)} sats`);
+  set('p-yield', `+${fmt(Math.floor(sats * CFG.APY / 100))} sats / yr`);
 }
 
-// ─── RENDER ───────────────────────────────────────────────────
+// ── Render ────────────────────────────────────
 function renderUI() {
-  setText('total-staked', fmt(S.tvl));
-  setText('rewards-earned', fmt(S.rewards));
-  setText('apy-display', `${CONFIG.APY}%`);
-  setText('user-staked-global', fmt(S.rewards));
-  if (S.addr) {
-    el('wallet-info-bar')?.classList.remove('hidden');
-    setText('wallet-address', `${S.addr.slice(0,10)}…${S.addr.slice(-8)}`);
-    setText('wallet-balance', `${fmt(S.balance)} sats`);
+  // Stats strip
+  set('s-tvl',         fmt(S.tvl));
+  set('s-rewards',     fmt(S.rewards));
+  set('s-apy',         `${CFG.APY}%`);
+  set('s-compounded',  fmt(S.rewards));
+
+  // Wallet header bar
+  const wbar = el('wallet-bar');
+  if (S.addr && wbar) {
+    wbar.style.display = 'flex';
+    set('hdr-addr', `${S.addr.slice(0,10)}…${S.addr.slice(-8)}`);
+    set('hdr-bal',  `${fmt(S.bal)} sats`);
   }
-  setText('wallet-balance-card', `${fmt(S.balance)} sats`);
-  setText('user-staked', `${fmt(S.staked)} sats`);
-  setText('my-rewards', `${fmt(S.rewards)} sats`);
-  setText('total-cycles', S.cycles);
-  const txEl = el('last-tx-hash');
-  if (txEl) { txEl.textContent = S.lastTx ? `${S.lastTx.slice(0,10)}…` : '-'; if (S.lastTx) txEl.href = `https://opscan.org/tx/${S.lastTx}`; }
+
+  // Stake card
+  set('f-balance', `${fmt(S.bal)} sats`);
+
+  // Unstake card
+  set('u-staked',  `${fmt(S.staked)} sats`);
+  set('u-rewards', `${fmt(S.rewards)} sats`);
+
+  // Engine
+  set('e-cycles', S.cycles);
+  const txEl = el('e-txhash');
+  if (txEl) { txEl.textContent = S.lastTx ? `${S.lastTx.slice(0,10)}…` : '—'; if (S.lastTx) txEl.href = `https://opscan.org/tx/${S.lastTx}`; }
+
+  // Unstake button
   const ub = el('unstake-btn');
   if (ub) ub.disabled = S.staked <= 0 || S.busy;
-  // Show/hide demo mode warning
-  const warn = el('demo-warning');
-  if (warn) warn.style.display = CONFIG.VAULT_ADDRESS ? 'none' : 'block';
+
   updatePreview();
 }
 
-// ─── COUNTDOWN ───────────────────────────────────────────────
+// ── Countdown ─────────────────────────────────
 function startCountdown() {
   setInterval(() => {
-    S.countdown = Math.max(0, S.countdown - 1);
-    if (S.countdown === 0) {
-      S.countdown = CONFIG.CYCLE_SECS;
+    S.cd = Math.max(0, S.cd - 1);
+    if (S.cd === 0) {
+      S.cd = CFG.CYCLE_SECS;
       if (S.p && S.staked > 0) {
-        const r = Math.floor(S.staked * CONFIG.APY / 100 / (365 * 24));
+        const r = Math.floor(S.staked * CFG.APY / 100 / (365 * 24));
         S.rewards += r; S.cycles++; renderUI();
         toast(`Auto-compound: +${fmt(r)} sats`, 'success');
       }
     }
-    const h = Math.floor(S.countdown / 3600), m = Math.floor((S.countdown % 3600) / 60), s = S.countdown % 60;
-    setText('next-compound-time', `${pad(h)}:${pad(m)}:${pad(s)}`);
-    setText('countdown-hr', pad(h)); setText('countdown-min', pad(m)); setText('countdown-sec', pad(s));
+    const h = Math.floor(S.cd / 3600), m = Math.floor((S.cd % 3600) / 60), s = S.cd % 60;
+    set('e-next',  `${pad(h)}:${pad(m)}:${pad(s)}`);
+    set('cd-h', pad(h)); set('cd-m', pad(m)); set('cd-s', pad(s));
   }, 1000);
 }
 
-// ─── AUTO RECONNECT ───────────────────────────────────────────
+// ── Auto reconnect ────────────────────────────
 async function tryReconnect() {
   const p = await waitProvider(2000);
   if (!p) return;
   try {
-    const accounts = await p.getAccounts?.();
-    if (!accounts?.length) return;
-    S.p = p; S.addr = accounts[0];
+    const accs = await p.getAccounts?.();
+    if (!accs?.length) return;
+    S.p = p; S.addr = accs[0];
     try { S.net = await p.getNetwork(); } catch {}
-    try { const b = await p.getBalance(); S.balance = b.confirmed ?? b.total ?? 0; } catch {}
-    p.on?.('accountsChanged', (a) => { S.addr = a?.[0] || null; renderUI(); });
-    p.on?.('networkChanged', (n) => { S.net = n; });
+    try { const b = await p.getBalance(); S.bal = b.confirmed ?? b.total ?? 0; } catch {}
+    p.on?.('accountsChanged', a => { S.addr = a?.[0] || null; renderUI(); });
+    p.on?.('networkChanged',  n => { S.net = n; });
     renderUI();
     toast('Wallet reconnected', 'info');
   } catch {}
 }
 
-// ─── INIT ─────────────────────────────────────────────────────
+// ── Init ──────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   el('connect-btn')  ?.addEventListener('click', connectWallet);
   el('stake-btn')    ?.addEventListener('click', stake);
   el('unstake-btn')  ?.addEventListener('click', unstake);
   el('compound-btn') ?.addEventListener('click', compound);
   el('max-btn')      ?.addEventListener('click', setMax);
-  el('stake-amount') ?.addEventListener('input', updatePreview);
+  el('stake-input')  ?.addEventListener('input', updatePreview);
   startCountdown();
   renderUI();
   tryReconnect();
 });
 
-window._vault = { S, CONFIG };
+window._vault = { S, CFG };
