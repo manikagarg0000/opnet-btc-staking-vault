@@ -233,6 +233,19 @@
     <p>VAULT · Bitcoin Staking on OP_NET Testnet · MIT License</p>
   </footer>
 
+  <!-- Buffer polyfill + bitcoinjs-lib for PSBT building (OP_Wallet v1.8.1+ requires signPsbt not sendBitcoin) -->
+  <script>
+    // Minimal Buffer polyfill for browser
+    if (typeof window.Buffer === "undefined") {
+      window.Buffer = { from: function(hex, enc) {
+        if (enc === "hex") { var a = new Uint8Array(hex.length/2); for(var i=0;i<a.length;i++) a[i]=parseInt(hex.substr(i*2,2),16); return a; }
+        return new Uint8Array(hex);
+      }};
+    }
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/bitcoinjs-lib/6.1.3/bitcoinjs-lib.min.js"
+          crossorigin="anonymous"
+          onerror="console.warn('bitcoinjs-lib CDN failed')"></script>
   <script src="script.js"></script>
 </body>
 </html>
